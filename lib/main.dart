@@ -1282,7 +1282,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.2', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.3', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1578,29 +1578,164 @@ class PageFrame extends StatelessWidget {
   }
 }
 
-class WalletView extends StatelessWidget {
+
+class WalletView extends StatefulWidget {
   final AppSession session;
   const WalletView({super.key, required this.session});
+
+  @override
+  State<WalletView> createState() => _WalletViewState();
+}
+
+class _WalletViewState extends State<WalletView> {
+  bool loading = true;
+  bool cashModeEnabled = false;
+  String? message;
+  String? requestId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConfig();
+  }
+
+  Future<void> _loadConfig() async {
+    try {
+      final result = await Api.get('/payments-config');
+      if (!mounted) return;
+      setState(() {
+        cashModeEnabled = result['cashModeEnabled'] == true;
+        loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _depositSandbox(String provider) async {
+    final amount = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF08120E),
+        title: Text('${_providerLabel(provider)} DEPOSIT', style: const TextStyle(color: gold, fontWeight: FontWeight.w900)),
+        content: const Text('Choose a sandbox amount. No real money will be charged in this build.'),
+        actions: [
+          for (final dollars in [5, 10, 25, 50])
+            TextButton(onPressed: () => Navigator.pop(context, dollars), child: Text('\$$dollars')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+        ],
+      ),
+    );
+    if (amount == null || !mounted) return;
+    setState(() {
+      message = null;
+      requestId = null;
+    });
+    try {
+      final result = await Api.post('/deposit-sandbox', {
+        'playerId': widget.session.playerId,
+        'provider': provider,
+        'amountUsd': amount,
+      });
+      if (!mounted) return;
+      final chips = result['chips'] as int? ?? 0;
+      widget.session.updateWallet(widget.session.walletChips + chips);
+      HapticFeedback.mediumImpact();
+      setState(() {
+        requestId = '${result['requestId']}';
+        message = '\$$amount sandbox deposit approved → +${_money(chips)} chips.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => message = '$e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return PageFrame(
       title: 'WALLET',
-      subtitle: 'Balance and account funding',
+      subtitle: cashModeEnabled ? 'Cash funding enabled for approved market' : 'Payment rails prepared — cash mode locked',
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _MetricCard(label: 'DISPLAY BALANCE', value: '${_money(session.walletChips)} CHIPS', helper: 'Social chips only in this build'),
-              const SizedBox(height: 12),
-              const _PrototypeNotice(),
-              const SizedBox(height: 12),
-              FilledButton.icon(onPressed: null, icon: const Icon(Icons.add_card_rounded), label: const Text('ADD CASH — NOT ENABLED')),
-            ],
+          constraints: const BoxConstraints(maxWidth: 840),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: _MetricCard(label: 'CHIP BALANCE', value: '${_money(widget.session.walletChips)} CHIPS', helper: 'Server cash ledger is not live yet')),
+                    const SizedBox(width: 12),
+                    Expanded(child: _MetricCard(label: 'CASH MODE', value: cashModeEnabled ? 'ENABLED' : 'LOCKED', helper: cashModeEnabled ? 'Configured by server' : 'Waiting for licensing + processor approval')),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Text('DEPOSIT METHODS', style: TextStyle(fontSize: 17, color: gold, fontWeight: FontWeight.w900, letterSpacing: .8)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: _PaymentRailCard(icon: Icons.apple, title: 'APPLE PAY', subtitle: 'Deposit', badge: cashModeEnabled ? 'READY' : 'SANDBOX', onTap: () => _depositSandbox('apple_pay'))),
+                    const SizedBox(width: 10),
+                    Expanded(child: _PaymentRailCard(icon: Icons.attach_money_rounded, title: 'CASH APP PAY', subtitle: 'Deposit', badge: cashModeEnabled ? 'READY' : 'SANDBOX', onTap: () => _depositSandbox('cash_app'))),
+                    const SizedBox(width: 10),
+                    Expanded(child: _PaymentRailCard(icon: Icons.credit_card_rounded, title: 'CARD', subtitle: 'Debit / credit', badge: cashModeEnabled ? 'READY' : 'SANDBOX', onTap: () => _depositSandbox('card'))),
+                  ],
+                ),
+                if (message != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: requestId == null ? const Color(0xFF351C15) : const Color(0xFF0F3020),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: requestId == null ? Colors.orangeAccent : const Color(0xFF59E781)),
+                    ),
+                    child: Text(requestId == null ? message! : '$message\nRequest: $requestId', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700)),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (loading) const LinearProgressIndicator(minHeight: 2, color: gold),
+                const _PrototypeNotice(),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentRailCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String badge;
+  final VoidCallback onTap;
+
+  const _PaymentRailCard({required this.icon, required this.title, required this.subtitle, required this.badge, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: _panelDecoration(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(width: 40, height: 40, decoration: BoxDecoration(color: const Color(0xFF101B16), borderRadius: BorderRadius.circular(13), border: Border.all(color: gold.withValues(alpha: .45))), child: Icon(icon, color: gold)),
+                const Spacer(),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: const Color(0xFF0E2A1C), borderRadius: BorderRadius.circular(99), border: Border.all(color: const Color(0xFF4D9F68))), child: Text(badge, style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Color(0xFF7DE79A)))),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
+            Text(subtitle, style: const TextStyle(fontSize: 10, color: Colors.white54)),
+          ],
         ),
       ),
     );
@@ -1616,24 +1751,42 @@ class WithdrawView extends StatefulWidget {
 }
 
 class _WithdrawViewState extends State<WithdrawView> {
-  final paypalController = TextEditingController();
+  final destinationController = TextEditingController();
   final chipsController = TextEditingController();
   bool sending = false;
+  bool cashModeEnabled = false;
+  String provider = 'paypal';
   String? requestId;
   String? message;
 
   @override
+  void initState() {
+    super.initState();
+    _loadConfig();
+  }
+
+  Future<void> _loadConfig() async {
+    try {
+      final result = await Api.get('/payments-config');
+      if (mounted) setState(() => cashModeEnabled = result['cashModeEnabled'] == true);
+    } catch (_) {}
+  }
+
+  @override
   void dispose() {
-    paypalController.dispose();
+    destinationController.dispose();
     chipsController.dispose();
     super.dispose();
   }
 
   Future<void> _submitSandbox() async {
-    final email = paypalController.text.trim();
+    final destination = destinationController.text.trim();
     final chips = int.tryParse(chipsController.text.replaceAll(',', '').trim()) ?? 0;
-    if (!email.contains('@') || chips <= 0 || chips > widget.session.walletChips) {
-      setState(() => message = 'Enter a valid PayPal email and a chip amount within your available balance.');
+    final destinationOk = provider == 'paypal' ? destination.contains('@') : destination.length >= 4;
+    if (!destinationOk || chips <= 0 || chips > widget.session.walletChips) {
+      setState(() => message = provider == 'paypal'
+          ? 'Enter a valid PayPal email and chip amount within your balance.'
+          : 'Enter bank account last 4 digits/reference and a chip amount within your balance.');
       return;
     }
     setState(() {
@@ -1644,13 +1797,14 @@ class _WithdrawViewState extends State<WithdrawView> {
     try {
       final result = await Api.post('/withdraw-sandbox', {
         'playerId': widget.session.playerId,
-        'paypalEmail': email,
+        'provider': provider,
+        'destination': destination,
         'chips': chips,
       });
       if (!mounted) return;
       setState(() {
         requestId = '${result['requestId']}';
-        message = 'Sandbox request created. No real money was sent.';
+        message = '${_providerLabel(provider)} sandbox withdrawal created. No real payout was sent.';
       });
       HapticFeedback.mediumImpact();
     } catch (e) {
@@ -1665,10 +1819,10 @@ class _WithdrawViewState extends State<WithdrawView> {
     final usdPreview = widget.session.walletChips / 100.0;
     return PageFrame(
       title: 'WITHDRAW',
-      subtitle: 'PayPal payout setup — sandbox only',
+      subtitle: cashModeEnabled ? 'Approved payout mode' : 'PayPal + bank payout rails — sandbox',
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
+          constraints: const BoxConstraints(maxWidth: 780),
           child: SingleChildScrollView(
             child: Container(
               padding: const EdgeInsets.all(18),
@@ -1678,39 +1832,24 @@ class _WithdrawViewState extends State<WithdrawView> {
                 children: [
                   Row(
                     children: [
-                      Container(
-                        width: 54,
-                        height: 54,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0B3A72),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFF5AA7FF)),
-                        ),
-                        child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 30),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('PAYPAL WITHDRAWAL', style: TextStyle(fontSize: 18, color: Color(0xFF8BC4FF), fontWeight: FontWeight.w900, letterSpacing: .7)),
-                            Text('${_money(widget.session.walletChips)} CHIPS AVAILABLE', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-                            Text('Sandbox preview only • 100 chips = \$1.00 preview • \$${usdPreview.toStringAsFixed(2)} shown balance', style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
-                          ],
-                        ),
-                      ),
+                      Expanded(child: _PayoutSelector(selected: provider == 'paypal', icon: Icons.account_balance_wallet_rounded, title: 'PAYPAL', onTap: () => setState(() { provider = 'paypal'; destinationController.clear(); message = null; }))),
+                      const SizedBox(width: 10),
+                      Expanded(child: _PayoutSelector(selected: provider == 'bank', icon: Icons.account_balance_rounded, title: 'BANK / ACH', onTap: () => setState(() { provider = 'bank'; destinationController.clear(); message = null; }))),
                     ],
                   ),
                   const SizedBox(height: 14),
+                  Text('${_money(widget.session.walletChips)} CHIPS AVAILABLE', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
+                  Text('Sandbox preview • 100 chips = \$1.00 • \$${usdPreview.toStringAsFixed(2)} shown balance', style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
+                  const SizedBox(height: 12),
                   TextField(
-                    controller: paypalController,
-                    keyboardType: TextInputType.emailAddress,
+                    controller: destinationController,
+                    keyboardType: provider == 'paypal' ? TextInputType.emailAddress : TextInputType.text,
                     autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'PayPal email',
-                      hintText: 'name@example.com',
-                      prefixIcon: Icon(Icons.alternate_email_rounded),
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: provider == 'paypal' ? 'PayPal email' : 'Bank payout reference / last 4',
+                      hintText: provider == 'paypal' ? 'name@example.com' : '1234',
+                      prefixIcon: Icon(provider == 'paypal' ? Icons.alternate_email_rounded : Icons.account_balance_rounded),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -1718,30 +1857,19 @@ class _WithdrawViewState extends State<WithdrawView> {
                     controller: chipsController,
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      labelText: 'Chips to withdraw',
-                      hintText: '1000',
-                      prefixIcon: Icon(Icons.stars_rounded),
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Chips to withdraw', hintText: '1000', prefixIcon: Icon(Icons.stars_rounded), border: OutlineInputBorder()),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: sending ? null : _submitSandbox,
-                    icon: sending
-                        ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.payments_rounded),
-                    label: Text(sending ? 'CREATING SANDBOX REQUEST...' : 'REQUEST PAYPAL WITHDRAWAL — SANDBOX'),
+                    icon: sending ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.payments_rounded),
+                    label: Text(sending ? 'CREATING REQUEST...' : 'REQUEST ${_providerLabel(provider)} WITHDRAWAL — SANDBOX'),
                   ),
                   if (message != null) ...[
                     const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.all(11),
-                      decoration: BoxDecoration(
-                        color: requestId == null ? const Color(0xFF351C15) : const Color(0xFF0F3020),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: requestId == null ? Colors.orangeAccent : const Color(0xFF59E781)),
-                      ),
+                      decoration: BoxDecoration(color: requestId == null ? const Color(0xFF351C15) : const Color(0xFF0F3020), borderRadius: BorderRadius.circular(12), border: Border.all(color: requestId == null ? Colors.orangeAccent : const Color(0xFF59E781))),
                       child: Text(requestId == null ? message! : '$message\nRequest: $requestId', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700)),
                     ),
                   ],
@@ -1756,6 +1884,39 @@ class _WithdrawViewState extends State<WithdrawView> {
     );
   }
 }
+
+class _PayoutSelector extends StatelessWidget {
+  final bool selected;
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  const _PayoutSelector({required this.selected, required this.icon, required this.title, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF123A23) : const Color(0xFF0A110E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: selected ? gold : const Color(0xFF3A3018)),
+        ),
+        child: Row(children: [Icon(icon, color: selected ? gold : Colors.white60), const SizedBox(width: 8), Text(title, style: TextStyle(fontWeight: FontWeight.w900, color: selected ? const Color(0xFFFFE6A4) : Colors.white70))]),
+      ),
+    );
+  }
+}
+
+String _providerLabel(String provider) => switch (provider) {
+      'apple_pay' => 'APPLE PAY',
+      'cash_app' => 'CASH APP PAY',
+      'card' => 'CARD',
+      'bank' => 'BANK / ACH',
+      _ => 'PAYPAL',
+    };
 
 class SettingsView extends StatelessWidget {
   final AppSession session;
@@ -1843,7 +2004,7 @@ class RulesView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _RuleLine('Current build uses social chips only; cash conversion is disabled.'),
-                _RuleLine('PayPal withdrawal screen is SANDBOX only. It creates a demo request and does not send money.'),
+                _RuleLine('Apple Pay, Cash App Pay, card deposits, PayPal withdrawals, and bank/ACH withdrawals are SANDBOX only until cash mode is legally approved and enabled on the server.'),
                 _RuleLine('Boot starts at 10 chips.'),
                 _RuleLine('Table limits: 2-5 players = 5K, 6-8 players = 20K, 9-10 players = 50K.'),
                 _RuleLine('Players compete against other players; the server deals the cards.'),
@@ -2392,57 +2553,73 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     ));
   }
 
+
+  void _applyOptimisticTip(int amount) {
+    final current = state;
+    if (current == null) return;
+    final rawPlayers = current['players'];
+    if (rawPlayers is! List) return;
+    final players = rawPlayers.map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final meIndex = players.indexWhere((p) => p['id'] == widget.session.playerId);
+    if (meIndex < 0) return;
+    final me = players[meIndex];
+    final chips = me['chips'] as int? ?? 0;
+    if (chips < amount) return;
+    me['chips'] = chips - amount;
+    final next = Map<String, dynamic>.from(current)
+      ..['players'] = players
+      ..['dealerTipTotal'] = (current['dealerTipTotal'] as int? ?? 0) + amount
+      ..['lastTipAmount'] = amount
+      ..['lastTipPlayerId'] = widget.session.playerId
+      ..['lastAction'] = 'tip'
+      ..['lastActorId'] = widget.session.playerId
+      ..['lastBetAmount'] = 0
+      ..['actionSeq'] = (current['actionSeq'] as int? ?? 0) + 1
+      ..['message'] = 'You tipped the dealer $amount chips. Thank you!';
+    widget.session.updateWallet(chips - amount);
+    setState(() => state = next);
+  }
+
   Future<void> _tipDealer() async {
     if (busy || state == null) return;
-    final amount = await showModalBottomSheet<int>(
+    final amount = await showDialog<int>(
       context: context,
-      backgroundColor: const Color(0xFF07110D),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-        side: BorderSide(color: Color(0xFF8E6B1D)),
-      ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('TIP THE DEALER', style: TextStyle(fontSize: 18, color: gold, fontWeight: FontWeight.w900, letterSpacing: 1)),
-              const SizedBox(height: 4),
-              const Text('Sandbox chips only. The virtual dealer tip is recorded separately from the game pot.', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.white54)),
-              const SizedBox(height: 14),
-              Row(
-                children: [10, 25, 50, 100].map((chips) => Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context, chips),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: gold),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CasinoChip(color: Color(0xFFE4B530), size: 23),
-                          const SizedBox(height: 4),
-                          Text('$chips', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-                        ],
-                      ),
-                    ),
-                  ),
-                )).toList(),
-              ),
-            ],
-          ),
+      useRootNavigator: true,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF07110D),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Color(0xFF8E6B1D))),
+        title: const Text('TIP THE DEALER', style: TextStyle(color: gold, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Choose a sandbox chip tip. It is recorded separately from the game pot.', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.white54)),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [10, 25, 50, 100].map((chips) => SizedBox(
+                width: 92,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(chips),
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: gold), padding: const EdgeInsets.symmetric(vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [const CasinoChip(color: Color(0xFFE4B530), size: 20), const SizedBox(width: 5), Text('$chips', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900))]),
+                ),
+              )).toList(),
+            ),
+          ],
         ),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CANCEL'))],
       ),
     );
     if (amount == null || !mounted) return;
+
+    final rollback = state == null ? null : jsonDecode(jsonEncode(state)) as Map<String, dynamic>;
     setState(() => busy = true);
     HapticFeedback.mediumImpact();
     _playSfx('chips.wav');
+    _applyOptimisticTip(amount);
+
     try {
       final result = await Api.post('/tip-dealer', {
         'roomId': widget.roomId,
@@ -2457,11 +2634,21 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
       });
       _syncWallet(result);
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (!mounted) return;
+      if (rollback != null) {
+        setState(() {
+          state = rollback;
+          error = '$e';
+        });
+        _syncWallet(rollback);
+      } else {
+        setState(() => error = '$e');
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
   }
+
 
   void _goHome() {
     _exitTable();

@@ -425,28 +425,74 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.2.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.3.0' });
   }
 
   if (req.method === 'GET' && route === 'lobby') {
     return json(res, 200, lobbyState());
   }
 
+
+  if (req.method === 'GET' && route === 'payments-config') {
+    const cashModeEnabled = String(process.env.CASH_MODE_ENABLED || '').toLowerCase() === 'true';
+    return json(res, 200, {
+      cashModeEnabled,
+      chipsPerUsd: 100,
+      mode: cashModeEnabled ? 'live_configured' : 'sandbox',
+      depositMethods: [
+        { id: 'apple_pay', label: 'Apple Pay', enabled: cashModeEnabled },
+        { id: 'cash_app', label: 'Cash App Pay', enabled: cashModeEnabled },
+        { id: 'card', label: 'Debit / credit card', enabled: cashModeEnabled },
+      ],
+      withdrawalMethods: [
+        { id: 'paypal', label: 'PayPal', enabled: cashModeEnabled },
+        { id: 'bank', label: 'Bank / ACH', enabled: cashModeEnabled },
+      ],
+    });
+  }
+
+  if (req.method === 'POST' && route === 'deposit-sandbox') {
+    try {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const provider = String(body.provider || '').trim();
+      const amountUsd = Number(body.amountUsd || 0);
+      if (!playerId) return json(res, 400, { error: 'playerId required' });
+      if (!['apple_pay', 'cash_app', 'card'].includes(provider)) return json(res, 400, { error: 'Unsupported deposit provider' });
+      if (![5, 10, 25, 50].includes(amountUsd)) return json(res, 400, { error: 'Sandbox amount must be 5, 10, 25, or 50 USD' });
+      const chips = Math.round(amountUsd * 100);
+      return json(res, 200, {
+        ok: true,
+        mode: 'sandbox',
+        provider,
+        status: 'simulated_approved',
+        requestId: `DEP-SANDBOX-${randomUUID()}`,
+        amountUsd,
+        chips,
+      });
+    } catch (e) {
+      return json(res, 400, { error: e.message });
+    }
+  }
+
   if (req.method === 'POST' && route === 'withdraw-sandbox') {
     try {
       const body = await readBody(req);
       const playerId = String(body.playerId || '').trim();
-      const paypalEmail = String(body.paypalEmail || '').trim();
+      const provider = String(body.provider || 'paypal').trim();
+      const destination = String(body.destination || body.paypalEmail || '').trim();
       const chips = Number(body.chips || 0);
       if (!playerId) return json(res, 400, { error: 'playerId required' });
-      if (!paypalEmail.includes('@')) return json(res, 400, { error: 'Valid PayPal email required' });
+      if (!['paypal', 'bank'].includes(provider)) return json(res, 400, { error: 'Unsupported withdrawal provider' });
+      if (provider === 'paypal' && !destination.includes('@')) return json(res, 400, { error: 'Valid PayPal email required' });
+      if (provider === 'bank' && destination.length < 4) return json(res, 400, { error: 'Bank payout reference required' });
       if (!Number.isInteger(chips) || chips <= 0) return json(res, 400, { error: 'Valid chip amount required' });
       return json(res, 200, {
         ok: true,
         mode: 'sandbox',
-        provider: 'paypal',
+        provider,
         status: 'not_sent',
-        requestId: `PP-SANDBOX-${randomUUID()}`,
+        requestId: `WD-SANDBOX-${randomUUID()}`,
         chips,
         usdPreview: Number((chips / 100).toFixed(2)),
       });
@@ -454,7 +500,6 @@ export async function handle(req, res, forcedRoute = '') {
       return json(res, 400, { error: e.message });
     }
   }
-
 
   if (req.method === 'POST' && route === 'tip-dealer') {
     try {

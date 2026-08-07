@@ -234,7 +234,7 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.5.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.6.0' });
   }
 
   if (req.method === 'POST' && route === 'join') {

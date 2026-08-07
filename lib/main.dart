@@ -420,6 +420,7 @@ class _CardLogo extends StatelessWidget {
   }
 }
 
+
 class LobbyView extends StatelessWidget {
   final AppSession session;
 
@@ -429,41 +430,44 @@ class LobbyView extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 300;
-        final outer = compact ? 7.0 : 10.0;
-        final gap = compact ? 6.0 : 9.0;
-        final heroHeight = min(max(constraints.maxHeight * .24, compact ? 58.0 : 68.0), compact ? 72.0 : 88.0);
-
+        final pad = constraints.maxWidth < 760 ? 8.0 : 12.0;
+        final heroHeight = constraints.maxHeight < 360 ? 70.0 : 86.0;
         return Padding(
-          padding: EdgeInsets.fromLTRB(outer, outer, outer, outer),
+          padding: EdgeInsets.fromLTRB(pad, pad, pad, pad),
           child: Column(
             children: [
-              SizedBox(
-                height: heroHeight,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: .94, end: 1),
-                  duration: const Duration(milliseconds: 420),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, value, child) => Opacity(
-                    opacity: value,
-                    child: Transform.scale(scale: value, alignment: Alignment.centerLeft, child: child),
-                  ),
-                  child: const PremiumHeroBanner(),
-                ),
-              ),
-              SizedBox(height: gap),
+              SizedBox(height: heroHeight, child: const PremiumHeroBanner()),
+              const SizedBox(height: 10),
               Expanded(
                 child: Column(
                   children: [
                     Expanded(
-                      child: Row(
-                        children: _rowCards(context, const [2, 3, 4, 5], gap),
+                      child: TableStripSection(
+                        title: 'GREEN TABLES',
+                        subtitle: 'Fast tables • Limit 5K',
+                        accent: const Color(0xFF76F06A),
+                        players: const [2, 3, 4, 5],
+                        session: session,
                       ),
                     ),
-                    SizedBox(height: gap),
+                    const SizedBox(height: 8),
                     Expanded(
-                      child: Row(
-                        children: _rowCards(context, const [6, 7, 8, 9, 10], gap),
+                      child: TableStripSection(
+                        title: 'BLUE TABLES',
+                        subtitle: 'Bigger rooms • Limit 20K',
+                        accent: const Color(0xFF62B9FF),
+                        players: const [6, 7, 8],
+                        session: session,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: TableStripSection(
+                        title: 'GOLD TABLES',
+                        subtitle: 'High action • Limit 50K',
+                        accent: const Color(0xFFFFD45A),
+                        players: const [9, 10],
+                        session: session,
                       ),
                     ),
                   ],
@@ -474,27 +478,6 @@ class LobbyView extends StatelessWidget {
         );
       },
     );
-  }
-
-  List<Widget> _rowCards(BuildContext context, List<int> values, double gap) {
-    final out = <Widget>[];
-    for (var i = 0; i < values.length; i++) {
-      final players = values[i];
-      out.add(
-        Expanded(
-          child: TableChoiceCard(
-            players: players,
-            onTap: () {
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => MatchmakingScreen(session: session, playerCount: players),
-              ));
-            },
-          ),
-        ),
-      );
-      if (i != values.length - 1) out.add(SizedBox(width: gap));
-    }
-    return out;
   }
 }
 
@@ -503,73 +486,76 @@ class PremiumHeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final showArt = constraints.maxWidth > 690;
-        final compact = constraints.maxHeight < 72;
-        return Container(
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(compact ? 16 : 20),
-            border: Border.all(color: const Color(0xFF98701C)),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF0A3C29), Color(0xFF052218), Color(0xFF06120E)],
-            ),
-            boxShadow: const [BoxShadow(color: Color(0x44000000), blurRadius: 18, offset: Offset(0, 8))],
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(child: CustomPaint(painter: _HeroTexturePainter())),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 20, vertical: compact ? 8 : 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: showArt ? 7 : 10,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              'CHOOSE YOUR TABLE',
-                              style: TextStyle(
-                                fontSize: compact ? 21 : 28,
-                                color: const Color(0xFFFFE6A4),
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.2,
-                                shadows: const [Shadow(color: Color(0xAA9D6B00), blurRadius: 8)],
-                              ),
-                            ),
-                          ),
-                          SizedBox(height: compact ? 3 : 7),
-                          Wrap(
-                            spacing: compact ? 9 : 16,
-                            runSpacing: 2,
-                            children: const [
-                              _HeroInfo(icon: Icons.monetization_on_rounded, text: '10 CHIP BOOT'),
-                              _HeroInfo(icon: Icons.emoji_events_rounded, text: '5,000 CAP'),
-                              _HeroInfo(icon: Icons.verified_user_rounded, text: 'FAIR & SECURE'),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (showArt) ...[
-                      const SizedBox(width: 10),
-                      const Expanded(flex: 3, child: _HeroArt()),
-                    ],
-                  ],
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFAD7B16), width: 1.2),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0C4A30), Color(0xFF06271B), Color(0xFF030806)],
+        ),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 20, offset: Offset(0, 8)),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(child: CustomPaint(painter: _HeroTexturePainter())),
+          Positioned(
+            right: -30,
+            top: -10,
+            bottom: -10,
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: .18,
+                child: Transform.rotate(
+                  angle: -.12,
+                  child: const Icon(Icons.casino_rounded, size: 170, color: Color(0xFFFFDB7A)),
                 ),
               ),
-            ],
+            ),
           ),
-        );
-      },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'ENTER THE GAME',
+                        style: TextStyle(
+                          fontSize: 26,
+                          color: Color(0xFFFFE7A4),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                          shadows: [Shadow(color: Color(0xAA8C6300), blurRadius: 10)],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: const [
+                          _HeroInfo(icon: Icons.flash_on_rounded, text: 'FULL GAME LOBBY'),
+                          SizedBox(width: 14),
+                          _HeroInfo(icon: Icons.swipe_rounded, text: 'SWIPE TABLES SIDEWAYS'),
+                          SizedBox(width: 14),
+                          _HeroInfo(icon: Icons.stars_rounded, text: 'PREMIUM ROOMS'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const _HeroChipAndCards(),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -577,10 +563,17 @@ class PremiumHeroBanner extends StatelessWidget {
 class _HeroTexturePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = const Color(0xFFFFD75A).withValues(alpha: .06);
-    for (double x = 10; x < size.width; x += 28) {
-      canvas.drawCircle(Offset(x, size.height * .5 + sin(x) * 8), 1.1, p);
+    final thin = Paint()
+      ..color = const Color(0xFFFFD75A).withValues(alpha: .05)
+      ..strokeWidth = .8;
+    for (double x = -size.height; x < size.width + size.height; x += 24) {
+      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), thin);
     }
+    final glow = Paint()
+      ..shader = const RadialGradient(
+        colors: [Color(0x2234F08A), Color(0x00000000)],
+      ).createShader(Rect.fromCircle(center: Offset(size.width * .25, size.height * .4), radius: size.width * .32));
+    canvas.drawRect(Offset.zero & size, glow);
   }
 
   @override
@@ -600,51 +593,45 @@ class _HeroInfo extends StatelessWidget {
       children: [
         Icon(icon, size: 15, color: gold),
         const SizedBox(width: 4),
-        Text(text, style: const TextStyle(fontSize: 9.5, color: Colors.white70, fontWeight: FontWeight.w800, letterSpacing: .45)),
+        Text(
+          text,
+          style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.w800, letterSpacing: .45),
+        ),
       ],
     );
   }
 }
 
-class _HeroArt extends StatelessWidget {
-  const _HeroArt();
+class _HeroChipAndCards extends StatelessWidget {
+  const _HeroChipAndCards();
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final s = min(constraints.maxHeight, constraints.maxWidth * .45);
-        return Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: min(constraints.maxWidth, 210),
-            height: constraints.maxHeight,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned(right: 12, top: 1, child: _BigCard(mark: 'A♠', angle: .16, height: s * .8)),
-                Positioned(right: 42, top: 2, child: _BigCard(mark: 'A♥', angle: -.06, height: s * .8)),
-                Positioned(right: 72, top: 4, child: _BigCard(mark: 'A♣', angle: -.18, height: s * .8)),
-                Positioned(
-                  right: 6,
-                  bottom: -s * .08,
-                  child: Container(
-                    width: s * .52,
-                    height: s * .52,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const RadialGradient(colors: [Color(0xFFFFE483), Color(0xFFD89208), Color(0xFF704000)]),
-                      border: Border.all(color: const Color(0xFFFFE6A4), width: 2),
-                      boxShadow: const [BoxShadow(color: Color(0x88764B00), blurRadius: 16)],
-                    ),
-                    child: Icon(Icons.spa_rounded, color: const Color(0xFF5E3400), size: s * .28),
-                  ),
-                ),
-              ],
+    return SizedBox(
+      width: 170,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          const Positioned(right: 16, top: 6, child: _BigCard(mark: 'A♠', angle: .16, height: 56)),
+          const Positioned(right: 45, top: 8, child: _BigCard(mark: 'A♥', angle: -.04, height: 56)),
+          const Positioned(right: 74, top: 10, child: _BigCard(mark: 'A♣', angle: -.2, height: 56)),
+          Positioned(
+            right: 14,
+            bottom: 0,
+            child: Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const RadialGradient(colors: [Color(0xFFFFE483), Color(0xFFD89208), Color(0xFF704000)]),
+                border: Border.all(color: const Color(0xFFFFE6A4), width: 2),
+                boxShadow: const [BoxShadow(color: Color(0x88764B00), blurRadius: 16)],
+              ),
+              child: const Icon(Icons.local_fire_department_rounded, color: Color(0xFF5E3400), size: 28),
             ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 }
@@ -661,16 +648,98 @@ class _BigCard extends StatelessWidget {
     return Transform.rotate(
       angle: angle,
       child: Container(
-        width: height * .62,
+        width: height * .64,
         height: height,
         padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
           color: const Color(0xFFFFF6DE),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: const Color(0xFFD8B45A)),
           boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 7, offset: Offset(0, 4))],
         ),
-        child: Text(mark, style: TextStyle(color: mark.contains('♥') ? const Color(0xFFB32028) : Colors.black, fontWeight: FontWeight.w900, fontSize: max(10.0, height * .16))),
+        child: Text(
+          mark,
+          style: TextStyle(
+            color: mark.contains('♥') ? const Color(0xFFB32028) : Colors.black,
+            fontWeight: FontWeight.w900,
+            fontSize: max(10.0, height * .18),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TableStripSection extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color accent;
+  final List<int> players;
+  final AppSession session;
+
+  const TableStripSection({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.accent,
+    required this.players,
+    required this.session,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: accent.withValues(alpha: .35)),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xCC07100D), Color(0xB7050B08)],
+        ),
+        boxShadow: [BoxShadow(color: accent.withValues(alpha: .08), blurRadius: 12)],
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: accent, boxShadow: [BoxShadow(color: accent.withValues(alpha: .4), blurRadius: 8)]),
+              ),
+              const SizedBox(width: 8),
+              Text(title, style: TextStyle(fontSize: 15, color: accent, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+              const SizedBox(width: 10),
+              Text(subtitle, style: const TextStyle(fontSize: 10.5, color: Colors.white54, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: players.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final p = players[index];
+                return SizedBox(
+                  width: 208,
+                  child: TableChoiceCard(
+                    players: p,
+                    onTap: () {
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => MatchmakingScreen(session: session, playerCount: p),
+                      ));
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -693,11 +762,13 @@ class _TableChoiceCardState extends State<TableChoiceCard> {
   Widget build(BuildContext context) {
     final players = widget.players;
     final palette = _paletteFor(players);
-    final tier = players <= 5 ? 'GREEN' : (players <= 8 ? 'BLUE' : 'GOLD');
+    final title = _titleFor(players);
+    final limit = _limitFor(players);
+    final tone = players <= 5 ? 'GREEN TABLE' : (players <= 8 ? 'BLUE TABLE' : 'GOLD TABLE');
 
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: .94, end: 1),
-      duration: Duration(milliseconds: 260 + players * 16),
+      tween: Tween(begin: .93, end: 1),
+      duration: Duration(milliseconds: 240 + players * 20),
       curve: Curves.easeOutBack,
       builder: (context, entrance, child) => Opacity(
         opacity: min(1.0, entrance),
@@ -713,105 +784,133 @@ class _TableChoiceCardState extends State<TableChoiceCard> {
         child: AnimatedScale(
           scale: pressed ? .965 : 1,
           duration: const Duration(milliseconds: 90),
-          curve: Curves.easeOut,
           child: Container(
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: palette.accent.withValues(alpha: .9), width: players == 2 ? 1.8 : 1),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: palette.accent.withValues(alpha: .72), width: 1.4),
               gradient: LinearGradient(colors: [palette.top, palette.bottom], begin: Alignment.topLeft, end: Alignment.bottomRight),
               boxShadow: [
-                BoxShadow(color: palette.accent.withValues(alpha: players == 2 ? .24 : .09), blurRadius: players == 2 ? 16 : 8, spreadRadius: 0),
-                const BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 5)),
+                BoxShadow(color: palette.accent.withValues(alpha: .18), blurRadius: 16, spreadRadius: 1),
+                const BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 6)),
               ],
             ),
             child: Stack(
               children: [
                 Positioned.fill(child: CustomPaint(painter: _CardTexturePainter(palette.accent))),
+                Positioned(
+                  right: -18,
+                  top: -14,
+                  child: Opacity(
+                    opacity: .09,
+                    child: Icon(players == 2 ? Icons.flash_on_rounded : Icons.groups_rounded, size: 98, color: palette.accent),
+                  ),
+                ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final tiny = constraints.maxHeight < 86;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: tiny ? 25 : 30,
-                                height: tiny ? 25 : 30,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: palette.accent.withValues(alpha: .12),
-                                  border: Border.all(color: palette.accent.withValues(alpha: .55)),
-                                ),
-                                child: Icon(Icons.groups_rounded, color: palette.accent, size: tiny ? 15 : 18),
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerLeft,
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text('$players', style: TextStyle(fontSize: tiny ? 25 : 30, height: .95, fontWeight: FontWeight.w900)),
-                                      const SizedBox(width: 5),
-                                      Padding(
-                                        padding: const EdgeInsets.only(bottom: 2),
-                                        child: Text('PLAYERS', style: TextStyle(fontSize: tiny ? 8 : 9, fontWeight: FontWeight.w900, color: Colors.white70, letterSpacing: .5)),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                decoration: BoxDecoration(color: palette.accent.withValues(alpha: .12), borderRadius: BorderRadius.circular(99)),
-                                child: Text(tier, style: TextStyle(fontSize: 6.8, color: palette.accent, fontWeight: FontWeight.w900, letterSpacing: .6)),
-                              ),
-                            ],
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: palette.accent.withValues(alpha: .14),
+                              border: Border.all(color: palette.accent.withValues(alpha: .65)),
+                            ),
+                            child: Icon(players == 2 ? Icons.sports_kabaddi_rounded : Icons.groups_rounded, color: palette.accent, size: 22),
                           ),
                           const Spacer(),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: Row(
-                              children: const [
-                                Icon(Icons.monetization_on_rounded, size: 11, color: Colors.white60),
-                                SizedBox(width: 3),
-                                Text('10', style: TextStyle(fontSize: 9, color: Colors.white70, fontWeight: FontWeight.w800)),
-                                SizedBox(width: 8),
-                                Text('•', style: TextStyle(color: gold)),
-                                SizedBox(width: 8),
-                                Icon(Icons.emoji_events_rounded, size: 11, color: Colors.white60),
-                                SizedBox(width: 3),
-                                Text('5,000', style: TextStyle(fontSize: 9, color: Colors.white70, fontWeight: FontWeight.w800)),
-                              ],
-                            ),
-                          ),
-                          SizedBox(height: tiny ? 4 : 6),
                           Container(
-                            height: tiny ? 25 : 30,
-                            alignment: Alignment.center,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              gradient: LinearGradient(colors: [palette.button1, palette.button2]),
-                              border: Border.all(color: palette.accent.withValues(alpha: .45)),
-                              boxShadow: [BoxShadow(color: palette.accent.withValues(alpha: .12), blurRadius: 7)],
+                              color: Colors.black.withValues(alpha: .22),
+                              borderRadius: BorderRadius.circular(99),
+                              border: Border.all(color: palette.accent.withValues(alpha: .35)),
                             ),
-                            child: const Text('PLAY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: .8)),
+                            child: Text(tone, style: TextStyle(fontSize: 9, color: palette.accent, fontWeight: FontWeight.w900, letterSpacing: .8)),
                           ),
                         ],
-                      );
-                    },
+                      ),
+                      const Spacer(),
+                      Text(
+                        title,
+                        style: const TextStyle(fontSize: 26, height: .95, fontWeight: FontWeight.w900, letterSpacing: .2),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        players == 2 ? 'FAST HEAD TO HEAD TABLE' : '$players PLAYER TABLE',
+                        style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w700, letterSpacing: .5),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _InfoPill(icon: Icons.local_fire_department_rounded, label: 'BOOT', value: '10', accent: palette.accent),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _InfoPill(icon: Icons.workspace_premium_rounded, label: 'LIMIT', value: limit, accent: palette.accent),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        height: 42,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: LinearGradient(colors: [palette.button1, palette.button2]),
+                          border: Border.all(color: palette.accent.withValues(alpha: .45)),
+                          boxShadow: [BoxShadow(color: palette.accent.withValues(alpha: .16), blurRadius: 8)],
+                        ),
+                        child: const Text('ENTER TABLE', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, letterSpacing: .95)),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color accent;
+
+  const _InfoPill({required this.icon, required this.label, required this.value, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .17),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: .28)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: accent),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 8.5, color: Colors.white60, fontWeight: FontWeight.w800, letterSpacing: .55)),
+              const SizedBox(height: 1),
+              Text(value, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w900)),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -831,37 +930,50 @@ class _CardTexturePainter extends CustomPainter {
       canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), p);
       canvas.drawLine(Offset(x + size.height, 0), Offset(x, size.height), p);
     }
+    final glow = Paint()
+      ..shader = RadialGradient(colors: [color.withValues(alpha: .12), const Color(0x00000000)]).createShader(
+        Rect.fromCircle(center: Offset(size.width * .12, size.height * .16), radius: size.width * .55),
+      );
+    canvas.drawRect(Offset.zero & size, glow);
   }
 
   @override
   bool shouldRepaint(covariant _CardTexturePainter oldDelegate) => oldDelegate.color != color;
 }
 
+String _titleFor(int players) => players == 2 ? '1 VS 1' : '$players PLAYERS';
+
+String _limitFor(int players) {
+  if (players <= 5) return '5K';
+  if (players <= 8) return '20K';
+  return '50K';
+}
+
 _TablePalette _paletteFor(int players) {
   if (players <= 5) {
     return const _TablePalette(
-      top: Color(0xFF0A4928),
-      bottom: Color(0xFF031A10),
+      top: Color(0xFF0B5B31),
+      bottom: Color(0xFF041B10),
       accent: Color(0xFF76F06A),
-      button1: Color(0xFF13812E),
-      button2: Color(0xFF064518),
+      button1: Color(0xFF15A13D),
+      button2: Color(0xFF0A6125),
     );
   }
   if (players <= 8) {
     return const _TablePalette(
-      top: Color(0xFF0A477C),
-      bottom: Color(0xFF031B34),
+      top: Color(0xFF0E4F8A),
+      bottom: Color(0xFF041C34),
       accent: Color(0xFF62B9FF),
-      button1: Color(0xFF1169B7),
-      button2: Color(0xFF063A70),
+      button1: Color(0xFF1A7EDB),
+      button2: Color(0xFF0B4F95),
     );
   }
   return const _TablePalette(
-    top: Color(0xFF604000),
-    bottom: Color(0xFF211500),
+    top: Color(0xFF6F4B05),
+    bottom: Color(0xFF261903),
     accent: Color(0xFFFFD45A),
-    button1: Color(0xFFB17600),
-    button2: Color(0xFF654100),
+    button1: Color(0xFFC68A12),
+    button2: Color(0xFF8E5D05),
   );
 }
 
@@ -923,7 +1035,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v0.5', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v0.6', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),

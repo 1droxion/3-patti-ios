@@ -42,6 +42,13 @@ export function readBody(req) {
   });
 }
 
+
+function tableCapFor(playerCount) {
+  if (playerCount <= 5) return 5000;
+  if (playerCount <= 8) return 20000;
+  return 50000;
+}
+
 function makeDeck() {
   const cards = [];
   for (let suit = 0; suit < 4; suit++) {
@@ -152,7 +159,7 @@ function publicState(room, playerId) {
     round: room.round,
     pot: room.pot,
     currentBet: room.currentBet,
-    cap: 5000,
+    cap: room.cap,
     feeRate: FEE_RATE,
     lastFee: room.lastFee || 0,
     lastPayout: room.lastPayout || 0,
@@ -198,6 +205,7 @@ function joinRoom({ playerId, name, playerCount }) {
       round: 0,
       pot: 0,
       currentBet: 10,
+      cap: tableCapFor(playerCount),
       message: 'Waiting for players...',
       winnerId: null,
       revealed: false,
@@ -234,7 +242,7 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.6.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.7.0' });
   }
 
   if (req.method === 'POST' && route === 'join') {
@@ -284,14 +292,14 @@ export async function handle(req, res, forcedRoute = '') {
           room.message = `${player.name} packed.`;
           maybeSettleLastStanding(room);
         } else if (action === 'chaal') {
-          if (room.pot >= 5000) return json(res, 409, { error: 'Table cap reached. Show cards.' });
-          const amount = Math.min(room.currentBet, 5000 - room.pot, player.chips);
+          if (room.pot >= room.cap) return json(res, 409, { error: 'Table cap reached. Show cards.' });
+          const amount = Math.min(room.currentBet, room.cap - room.pot, player.chips);
           if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
           player.chips -= amount;
           room.pot += amount;
           room.message = `${player.name} added ${amount} chips.`;
-          room.currentBet = Math.min(room.currentBet * 2, 5000);
-          if (room.pot >= 5000) room.message += ' Table cap reached.';
+          room.currentBet = Math.min(room.currentBet * 2, room.cap);
+          if (room.pot >= room.cap) room.message += ' Table cap reached.';
         } else if (action === 'show') {
           settle(room);
         } else {

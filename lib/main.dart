@@ -421,6 +421,7 @@ class _CardLogo extends StatelessWidget {
 }
 
 
+
 class LobbyView extends StatelessWidget {
   final AppSession session;
 
@@ -430,53 +431,123 @@ class LobbyView extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final pad = constraints.maxWidth < 760 ? 8.0 : 12.0;
-        final heroHeight = constraints.maxHeight < 360 ? 70.0 : 86.0;
+        final compact = constraints.maxHeight < 340;
+        final pad = compact ? 7.0 : 11.0;
+        final heroHeight = compact ? 68.0 : 84.0;
+        final roomWidth = compact ? 170.0 : 205.0;
+
         return Padding(
-          padding: EdgeInsets.fromLTRB(pad, pad, pad, pad),
+          padding: EdgeInsets.all(pad),
           child: Column(
             children: [
               SizedBox(height: heroHeight, child: const PremiumHeroBanner()),
-              const SizedBox(height: 10),
+              SizedBox(height: compact ? 7 : 10),
+              Row(
+                children: [
+                  const Icon(Icons.swipe_rounded, color: gold, size: 20),
+                  const SizedBox(width: 7),
+                  const Text(
+                    'SWIPE TO CHOOSE A TABLE',
+                    style: TextStyle(color: Color(0xFFFFE4A0), fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: .8),
+                  ),
+                  const Spacer(),
+                  _TierLegend(color: Color(0xFF76F06A), text: '5K'),
+                  const SizedBox(width: 8),
+                  _TierLegend(color: Color(0xFF62B9FF), text: '20K'),
+                  const SizedBox(width: 8),
+                  _TierLegend(color: Color(0xFFFFD45A), text: '50K'),
+                ],
+              ),
+              SizedBox(height: compact ? 6 : 9),
               Expanded(
-                child: Column(
+                child: Stack(
                   children: [
-                    Expanded(
-                      child: TableStripSection(
-                        title: 'GREEN TABLES',
-                        subtitle: 'Fast tables • Limit 5K',
-                        accent: const Color(0xFF76F06A),
-                        players: const [2, 3, 4, 5],
-                        session: session,
+                    Positioned.fill(
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                        padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 20, vertical: compact ? 4 : 8),
+                        itemCount: 9,
+                        separatorBuilder: (_, __) => SizedBox(width: compact ? 14 : 20),
+                        itemBuilder: (context, index) {
+                          final players = index + 2;
+                          return SizedBox(
+                            width: roomWidth,
+                            child: RoundRoomCard(
+                              players: players,
+                              compact: compact,
+                              onTap: () {
+                                Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => MatchmakingScreen(session: session, playerCount: players),
+                                ));
+                              },
+                            ),
+                          );
+                        },
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: TableStripSection(
-                        title: 'BLUE TABLES',
-                        subtitle: 'Bigger rooms • Limit 20K',
-                        accent: const Color(0xFF62B9FF),
-                        players: const [6, 7, 8],
-                        session: session,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: TableStripSection(
-                        title: 'GOLD TABLES',
-                        subtitle: 'High action • Limit 50K',
-                        accent: const Color(0xFFFFD45A),
-                        players: const [9, 10],
-                        session: session,
-                      ),
-                    ),
+                    const Positioned(left: 0, top: 0, bottom: 0, child: _EdgeFade(left: true)),
+                    const Positioned(right: 0, top: 0, bottom: 0, child: _EdgeFade(left: false)),
                   ],
                 ),
+              ),
+              SizedBox(height: compact ? 2 : 5),
+              const Text(
+                'Swipe left or right • Tap a room to enter matchmaking',
+                style: TextStyle(color: Colors.white38, fontSize: 9.5, fontWeight: FontWeight.w700),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _TierLegend extends StatelessWidget {
+  final Color color;
+  final String text;
+
+  const _TierLegend({required this.color, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .09),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: color.withValues(alpha: .38)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+          const SizedBox(width: 5),
+          Text('$text LIMIT', style: TextStyle(fontSize: 8.5, color: color, fontWeight: FontWeight.w900, letterSpacing: .5)),
+        ],
+      ),
+    );
+  }
+}
+
+class _EdgeFade extends StatelessWidget {
+  final bool left;
+  const _EdgeFade({required this.left});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: 28,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: left ? Alignment.centerLeft : Alignment.centerRight,
+            end: left ? Alignment.centerRight : Alignment.centerLeft,
+            colors: const [Color(0xEE020A08), Color(0x00020A08)],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -490,35 +561,30 @@ class PremiumHeroBanner extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFAD7B16), width: 1.2),
+        border: Border.all(color: const Color(0xFFAD7B16), width: 1.1),
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF0C4A30), Color(0xFF06271B), Color(0xFF030806)],
+          colors: [Color(0xFF0D4D32), Color(0xFF072719), Color(0xFF030806)],
         ),
-        boxShadow: const [
-          BoxShadow(color: Color(0x66000000), blurRadius: 20, offset: Offset(0, 8)),
-        ],
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 20, offset: Offset(0, 8))],
       ),
       child: Stack(
         children: [
           Positioned.fill(child: CustomPaint(painter: _HeroTexturePainter())),
           Positioned(
-            right: -30,
-            top: -10,
-            bottom: -10,
-            child: IgnorePointer(
-              child: Opacity(
-                opacity: .18,
-                child: Transform.rotate(
-                  angle: -.12,
-                  child: const Icon(Icons.casino_rounded, size: 170, color: Color(0xFFFFDB7A)),
-                ),
+            right: -20,
+            top: -24,
+            child: Opacity(
+              opacity: .11,
+              child: Transform.rotate(
+                angle: -.16,
+                child: const Icon(Icons.casino_rounded, size: 185, color: Color(0xFFFFD96A)),
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
             child: Row(
               children: [
                 Expanded(
@@ -526,30 +592,33 @@ class PremiumHeroBanner extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'ENTER THE GAME',
-                        style: TextStyle(
-                          fontSize: 26,
-                          color: Color(0xFFFFE7A4),
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.2,
-                          shadows: [Shadow(color: Color(0xAA8C6300), blurRadius: 10)],
+                      const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'CHOOSE YOUR TABLE',
+                          style: TextStyle(
+                            fontSize: 27,
+                            color: Color(0xFFFFE7A4),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.2,
+                            shadows: [Shadow(color: Color(0xAA8C6300), blurRadius: 10)],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Row(
+                      const SizedBox(height: 3),
+                      Wrap(
+                        spacing: 14,
+                        runSpacing: 2,
                         children: const [
-                          _HeroInfo(icon: Icons.flash_on_rounded, text: 'FULL GAME LOBBY'),
-                          SizedBox(width: 14),
-                          _HeroInfo(icon: Icons.swipe_rounded, text: 'SWIPE TABLES SIDEWAYS'),
-                          SizedBox(width: 14),
-                          _HeroInfo(icon: Icons.stars_rounded, text: 'PREMIUM ROOMS'),
+                          _HeroInfo(icon: Icons.local_fire_department_rounded, text: 'BOOT 10'),
+                          _HeroInfo(icon: Icons.people_alt_rounded, text: 'REAL PLAYERS'),
+                          _HeroInfo(icon: Icons.swipe_rounded, text: 'HORIZONTAL ROOMS'),
                         ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 10),
                 const _HeroChipAndCards(),
               ],
             ),
@@ -563,16 +632,16 @@ class PremiumHeroBanner extends StatelessWidget {
 class _HeroTexturePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final thin = Paint()
-      ..color = const Color(0xFFFFD75A).withValues(alpha: .05)
-      ..strokeWidth = .8;
-    for (double x = -size.height; x < size.width + size.height; x += 24) {
-      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), thin);
+    final p = Paint()
+      ..color = const Color(0xFFFFD75A).withValues(alpha: .045)
+      ..strokeWidth = .7;
+    for (double x = -size.height; x < size.width + size.height; x += 25) {
+      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), p);
     }
     final glow = Paint()
-      ..shader = const RadialGradient(
-        colors: [Color(0x2234F08A), Color(0x00000000)],
-      ).createShader(Rect.fromCircle(center: Offset(size.width * .25, size.height * .4), radius: size.width * .32));
+      ..shader = const RadialGradient(colors: [Color(0x2238F095), Color(0x00000000)]).createShader(
+        Rect.fromCircle(center: Offset(size.width * .28, size.height * .48), radius: size.width * .36),
+      );
     canvas.drawRect(Offset.zero & size, glow);
   }
 
@@ -583,7 +652,6 @@ class _HeroTexturePainter extends CustomPainter {
 class _HeroInfo extends StatelessWidget {
   final IconData icon;
   final String text;
-
   const _HeroInfo({required this.icon, required this.text});
 
   @override
@@ -591,12 +659,9 @@ class _HeroInfo extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: gold),
+        Icon(icon, size: 14, color: gold),
         const SizedBox(width: 4),
-        Text(
-          text,
-          style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.w800, letterSpacing: .45),
-        ),
+        Text(text, style: const TextStyle(fontSize: 9.5, color: Colors.white70, fontWeight: FontWeight.w800, letterSpacing: .45)),
       ],
     );
   }
@@ -608,26 +673,26 @@ class _HeroChipAndCards extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 170,
+      width: 154,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          const Positioned(right: 16, top: 6, child: _BigCard(mark: 'A♠', angle: .16, height: 56)),
-          const Positioned(right: 45, top: 8, child: _BigCard(mark: 'A♥', angle: -.04, height: 56)),
-          const Positioned(right: 74, top: 10, child: _BigCard(mark: 'A♣', angle: -.2, height: 56)),
+          const Positioned(right: 10, top: 1, child: _BigCard(mark: 'A♠', angle: .16, height: 58)),
+          const Positioned(right: 40, top: 3, child: _BigCard(mark: 'A♥', angle: -.03, height: 58)),
+          const Positioned(right: 70, top: 5, child: _BigCard(mark: 'A♣', angle: -.18, height: 58)),
           Positioned(
-            right: 14,
-            bottom: 0,
+            right: 8,
+            bottom: -3,
             child: Container(
-              width: 58,
-              height: 58,
+              width: 57,
+              height: 57,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const RadialGradient(colors: [Color(0xFFFFE483), Color(0xFFD89208), Color(0xFF704000)]),
                 border: Border.all(color: const Color(0xFFFFE6A4), width: 2),
                 boxShadow: const [BoxShadow(color: Color(0x88764B00), blurRadius: 16)],
               ),
-              child: const Icon(Icons.local_fire_department_rounded, color: Color(0xFF5E3400), size: 28),
+              child: const Icon(Icons.stars_rounded, color: Color(0xFF5E3400), size: 28),
             ),
           ),
         ],
@@ -640,7 +705,6 @@ class _BigCard extends StatelessWidget {
   final String mark;
   final double angle;
   final double height;
-
   const _BigCard({required this.mark, required this.angle, required this.height});
 
   @override
@@ -653,7 +717,7 @@ class _BigCard extends StatelessWidget {
         padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
           color: const Color(0xFFFFF6DE),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(9),
           border: Border.all(color: const Color(0xFFD8B45A)),
           boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 7, offset: Offset(0, 4))],
         ),
@@ -670,110 +734,34 @@ class _BigCard extends StatelessWidget {
   }
 }
 
-class TableStripSection extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final Color accent;
-  final List<int> players;
-  final AppSession session;
-
-  const TableStripSection({
-    super.key,
-    required this.title,
-    required this.subtitle,
-    required this.accent,
-    required this.players,
-    required this.session,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: accent.withValues(alpha: .35)),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xCC07100D), Color(0xB7050B08)],
-        ),
-        boxShadow: [BoxShadow(color: accent.withValues(alpha: .08), blurRadius: 12)],
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: accent, boxShadow: [BoxShadow(color: accent.withValues(alpha: .4), blurRadius: 8)]),
-              ),
-              const SizedBox(width: 8),
-              Text(title, style: TextStyle(fontSize: 15, color: accent, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
-              const SizedBox(width: 10),
-              Text(subtitle, style: const TextStyle(fontSize: 10.5, color: Colors.white54, fontWeight: FontWeight.w700)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: players.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final p = players[index];
-                return SizedBox(
-                  width: 208,
-                  child: TableChoiceCard(
-                    players: p,
-                    onTap: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => MatchmakingScreen(session: session, playerCount: p),
-                      ));
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class TableChoiceCard extends StatefulWidget {
+class RoundRoomCard extends StatefulWidget {
   final int players;
+  final bool compact;
   final VoidCallback onTap;
 
-  const TableChoiceCard({super.key, required this.players, required this.onTap});
+  const RoundRoomCard({super.key, required this.players, required this.compact, required this.onTap});
 
   @override
-  State<TableChoiceCard> createState() => _TableChoiceCardState();
+  State<RoundRoomCard> createState() => _RoundRoomCardState();
 }
 
-class _TableChoiceCardState extends State<TableChoiceCard> {
+class _RoundRoomCardState extends State<RoundRoomCard> {
   bool pressed = false;
 
   @override
   Widget build(BuildContext context) {
     final players = widget.players;
     final palette = _paletteFor(players);
-    final title = _titleFor(players);
     final limit = _limitFor(players);
-    final tone = players <= 5 ? 'GREEN TABLE' : (players <= 8 ? 'BLUE TABLE' : 'GOLD TABLE');
+    final title = players == 2 ? '1 VS 1' : '$players';
+    final subtitle = players == 2 ? 'DUEL' : 'PLAYERS';
+    final diameter = widget.compact ? 158.0 : 190.0;
 
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: .93, end: 1),
-      duration: Duration(milliseconds: 240 + players * 20),
+      tween: Tween(begin: .9, end: 1),
+      duration: Duration(milliseconds: 260 + players * 18),
       curve: Curves.easeOutBack,
-      builder: (context, entrance, child) => Opacity(
-        opacity: min(1.0, entrance),
-        child: Transform.scale(scale: entrance, child: child),
-      ),
+      builder: (context, value, child) => Opacity(opacity: min(1.0, value), child: Transform.scale(scale: value, child: child)),
       child: GestureDetector(
         onTapDown: (_) => setState(() => pressed = true),
         onTapCancel: () => setState(() => pressed = false),
@@ -782,97 +770,92 @@ class _TableChoiceCardState extends State<TableChoiceCard> {
           widget.onTap();
         },
         child: AnimatedScale(
-          scale: pressed ? .965 : 1,
+          scale: pressed ? .95 : 1,
           duration: const Duration(milliseconds: 90),
-          child: Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: palette.accent.withValues(alpha: .72), width: 1.4),
-              gradient: LinearGradient(colors: [palette.top, palette.bottom], begin: Alignment.topLeft, end: Alignment.bottomRight),
-              boxShadow: [
-                BoxShadow(color: palette.accent.withValues(alpha: .18), blurRadius: 16, spreadRadius: 1),
-                const BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 6)),
-              ],
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(child: CustomPaint(painter: _CardTexturePainter(palette.accent))),
-                Positioned(
-                  right: -18,
-                  top: -14,
-                  child: Opacity(
-                    opacity: .09,
-                    child: Icon(players == 2 ? Icons.flash_on_rounded : Icons.groups_rounded, size: 98, color: palette.accent),
+          curve: Curves.easeOut,
+          child: Center(
+            child: SizedBox(
+              width: diameter,
+              height: diameter,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        center: const Alignment(-.28, -.38),
+                        radius: 1.0,
+                        colors: [palette.top, palette.bottom],
+                      ),
+                      border: Border.all(color: palette.accent.withValues(alpha: .9), width: 2.2),
+                      boxShadow: [
+                        BoxShadow(color: palette.accent.withValues(alpha: .25), blurRadius: 20, spreadRadius: 1),
+                        const BoxShadow(color: Colors.black54, blurRadius: 16, offset: Offset(0, 8)),
+                      ],
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: palette.accent.withValues(alpha: .14),
-                              border: Border.all(color: palette.accent.withValues(alpha: .65)),
-                            ),
-                            child: Icon(players == 2 ? Icons.sports_kabaddi_rounded : Icons.groups_rounded, color: palette.accent, size: 22),
+                  Positioned.fill(child: CustomPaint(painter: _CasinoRingPainter(palette.accent))),
+                  Positioned(top: -10, child: _RoomCards(accent: palette.accent, compact: widget.compact)),
+                  Positioned(
+                    top: widget.compact ? 44 : 57,
+                    child: Icon(players == 2 ? Icons.person_rounded : Icons.groups_rounded, color: palette.accent, size: widget.compact ? 26 : 30),
+                  ),
+                  Positioned(
+                    top: widget.compact ? 71 : 90,
+                    child: Column(
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: players == 2 ? (widget.compact ? 24 : 28) : (widget.compact ? 31 : 38),
+                            height: .9,
+                            color: const Color(0xFFFFF3D0),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: .2,
+                            shadows: const [Shadow(color: Colors.black87, blurRadius: 5, offset: Offset(0, 2))],
                           ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: .22),
-                              borderRadius: BorderRadius.circular(99),
-                              border: Border.all(color: palette.accent.withValues(alpha: .35)),
-                            ),
-                            child: Text(tone, style: TextStyle(fontSize: 9, color: palette.accent, fontWeight: FontWeight.w900, letterSpacing: .8)),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      Text(
-                        title,
-                        style: const TextStyle(fontSize: 26, height: .95, fontWeight: FontWeight.w900, letterSpacing: .2),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        players == 2 ? 'FAST HEAD TO HEAD TABLE' : '$players PLAYER TABLE',
-                        style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w700, letterSpacing: .5),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _InfoPill(icon: Icons.local_fire_department_rounded, label: 'BOOT', value: '10', accent: palette.accent),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _InfoPill(icon: Icons.workspace_premium_rounded, label: 'LIMIT', value: limit, accent: palette.accent),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        height: 42,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          gradient: LinearGradient(colors: [palette.button1, palette.button2]),
-                          border: Border.all(color: palette.accent.withValues(alpha: .45)),
-                          boxShadow: [BoxShadow(color: palette.accent.withValues(alpha: .16), blurRadius: 8)],
                         ),
-                        child: const Text('ENTER TABLE', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, letterSpacing: .95)),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        Text(subtitle, style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.w900, letterSpacing: .8)),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  Positioned(
+                    left: widget.compact ? 16 : 20,
+                    bottom: widget.compact ? 32 : 38,
+                    child: _ChipStack(accent: palette.accent, mirror: false, compact: widget.compact),
+                  ),
+                  Positioned(
+                    right: widget.compact ? 16 : 20,
+                    bottom: widget.compact ? 32 : 38,
+                    child: _ChipStack(accent: palette.accent, mirror: true, compact: widget.compact),
+                  ),
+                  Positioned(
+                    bottom: widget.compact ? 10 : 13,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: widget.compact ? 18 : 22, vertical: widget.compact ? 5 : 7),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(99),
+                        gradient: LinearGradient(colors: [palette.button1, palette.button2]),
+                        border: Border.all(color: palette.accent.withValues(alpha: .6)),
+                        boxShadow: [BoxShadow(color: palette.accent.withValues(alpha: .18), blurRadius: 8)],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.local_fire_department_rounded, color: Colors.white70, size: 12),
+                          const SizedBox(width: 4),
+                          const Text('10', style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w900)),
+                          const SizedBox(width: 8),
+                          Text('•  $limit LIMIT', style: TextStyle(fontSize: 10, color: palette.accent, fontWeight: FontWeight.w900)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -881,67 +864,107 @@ class _TableChoiceCardState extends State<TableChoiceCard> {
   }
 }
 
-class _InfoPill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
+class _RoomCards extends StatelessWidget {
   final Color accent;
-
-  const _InfoPill({required this.icon, required this.label, required this.value, required this.accent});
+  final bool compact;
+  const _RoomCards({required this.accent, required this.compact});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .17),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withValues(alpha: .28)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: accent),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: const TextStyle(fontSize: 8.5, color: Colors.white60, fontWeight: FontWeight.w800, letterSpacing: .55)),
-              const SizedBox(height: 1),
-              Text(value, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w900)),
-            ],
+    final h = compact ? 42.0 : 50.0;
+    Widget mini(String mark, double angle, double dx) => Transform.translate(
+          offset: Offset(dx, 0),
+          child: Transform.rotate(
+            angle: angle,
+            child: Container(
+              width: h * .63,
+              height: h,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF5DE),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: accent.withValues(alpha: .75)),
+                boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 5, offset: Offset(0, 3))],
+              ),
+              child: Text(
+                mark,
+                style: TextStyle(color: mark.contains('♥') ? const Color(0xFFB51F28) : Colors.black, fontWeight: FontWeight.w900, fontSize: compact ? 8 : 10),
+              ),
+            ),
           ),
-        ],
+        );
+    return SizedBox(
+      width: h * 1.9,
+      height: h + 8,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [mini('A♣', -.2, -20), mini('A♥', 0, 0), mini('A♠', .2, 20)],
       ),
     );
   }
 }
 
-class _CardTexturePainter extends CustomPainter {
-  final Color color;
-  const _CardTexturePainter(this.color);
+class _ChipStack extends StatelessWidget {
+  final Color accent;
+  final bool mirror;
+  final bool compact;
+  const _ChipStack({required this.accent, required this.mirror, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final size = compact ? 14.0 : 17.0;
+    return Transform.rotate(
+      angle: mirror ? .12 : -.12,
+      child: Row(
+        children: List.generate(3, (i) {
+          return Transform.translate(
+            offset: Offset(i * -3.0, -i * 3.0),
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: i.isEven ? accent : const Color(0xFF111111),
+                border: Border.all(color: const Color(0xFFFFE6A4), width: 1),
+                boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+              ),
+              child: Center(child: Container(width: size * .36, height: size * .36, decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x55FFFFFF)))),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _CasinoRingPainter extends CustomPainter {
+  final Color accent;
+  const _CasinoRingPainter(this.accent);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..color = color.withValues(alpha: .045)
-      ..strokeWidth = .7;
-    const step = 18.0;
-    for (double x = -size.height; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), p);
-      canvas.drawLine(Offset(x + size.height, 0), Offset(x, size.height), p);
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2 - 7;
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = const Color(0xFFFFD86A).withValues(alpha: .46);
+    canvas.drawCircle(center, radius, ring);
+    final inner = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = accent.withValues(alpha: .28);
+    canvas.drawCircle(center, radius - 7, inner);
+    final dot = Paint()..color = const Color(0xFFFFE5A0).withValues(alpha: .75);
+    for (var i = 0; i < 12; i++) {
+      final a = i * pi / 6;
+      canvas.drawCircle(Offset(center.dx + cos(a) * radius, center.dy + sin(a) * radius), 1.3, dot);
     }
-    final glow = Paint()
-      ..shader = RadialGradient(colors: [color.withValues(alpha: .12), const Color(0x00000000)]).createShader(
-        Rect.fromCircle(center: Offset(size.width * .12, size.height * .16), radius: size.width * .55),
-      );
-    canvas.drawRect(Offset.zero & size, glow);
   }
 
   @override
-  bool shouldRepaint(covariant _CardTexturePainter oldDelegate) => oldDelegate.color != color;
+  bool shouldRepaint(covariant _CasinoRingPainter oldDelegate) => oldDelegate.accent != accent;
 }
-
-String _titleFor(int players) => players == 2 ? '1 VS 1' : '$players PLAYERS';
 
 String _limitFor(int players) {
   if (players <= 5) return '5K';
@@ -952,28 +975,28 @@ String _limitFor(int players) {
 _TablePalette _paletteFor(int players) {
   if (players <= 5) {
     return const _TablePalette(
-      top: Color(0xFF0B5B31),
-      bottom: Color(0xFF041B10),
+      top: Color(0xFF126238),
+      bottom: Color(0xFF03180F),
       accent: Color(0xFF76F06A),
-      button1: Color(0xFF15A13D),
-      button2: Color(0xFF0A6125),
+      button1: Color(0xFF13943A),
+      button2: Color(0xFF07511E),
     );
   }
   if (players <= 8) {
     return const _TablePalette(
-      top: Color(0xFF0E4F8A),
-      bottom: Color(0xFF041C34),
+      top: Color(0xFF115998),
+      bottom: Color(0xFF03182D),
       accent: Color(0xFF62B9FF),
-      button1: Color(0xFF1A7EDB),
-      button2: Color(0xFF0B4F95),
+      button1: Color(0xFF1473C8),
+      button2: Color(0xFF073F78),
     );
   }
   return const _TablePalette(
-    top: Color(0xFF6F4B05),
-    bottom: Color(0xFF261903),
+    top: Color(0xFF765108),
+    bottom: Color(0xFF241600),
     accent: Color(0xFFFFD45A),
-    button1: Color(0xFFC68A12),
-    button2: Color(0xFF8E5D05),
+    button1: Color(0xFFC88B12),
+    button2: Color(0xFF7C5005),
   );
 }
 
@@ -983,7 +1006,6 @@ class _TablePalette {
   final Color accent;
   final Color button1;
   final Color button2;
-
   const _TablePalette({required this.top, required this.bottom, required this.accent, required this.button1, required this.button2});
 }
 
@@ -1035,7 +1057,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v0.6', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v0.7', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1410,7 +1432,7 @@ class RulesView extends StatelessWidget {
               children: [
                 _RuleLine('1 chip = ₹1 in the planned cash-wallet model.'),
                 _RuleLine('Boot starts at 10 chips.'),
-                _RuleLine('Maximum table pot is 5,000 chips in this prototype.'),
+                _RuleLine('Table limits: 2-5 players = 5K, 6-8 players = 20K, 9-10 players = 50K.'),
                 _RuleLine('Players compete against other players; the server deals the cards.'),
                 _RuleLine('Prototype table fee: 5% of a settled pot. The winner receives the remaining payout.'),
                 SizedBox(height: 12),

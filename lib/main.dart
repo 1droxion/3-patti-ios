@@ -354,7 +354,7 @@ class AppHeader extends StatelessWidget {
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 180),
                             child: Text(
-                              '₹${_money(session.walletChips)}',
+                              '${_money(session.walletChips)} CHIPS',
                               key: ValueKey(session.walletChips),
                               style: TextStyle(fontSize: compact ? 14 : 16, height: 1, fontWeight: FontWeight.w900),
                             ),
@@ -362,7 +362,7 @@ class AppHeader extends StatelessWidget {
                           if (!compact)
                             const Padding(
                               padding: EdgeInsets.only(top: 2),
-                              child: Text('1 CHIP = ₹1', style: TextStyle(fontSize: 7.5, color: Colors.white54, fontWeight: FontWeight.w800, letterSpacing: .6)),
+                              child: Text('SOCIAL CHIP BALANCE', style: TextStyle(fontSize: 7.5, color: Colors.white54, fontWeight: FontWeight.w800, letterSpacing: .6)),
                             ),
                         ],
                       ),
@@ -1074,7 +1074,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v0.8', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.0', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1325,7 +1325,7 @@ class WalletView extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _MetricCard(label: 'DISPLAY BALANCE', value: '₹${_money(session.walletChips)}', helper: '${_money(session.walletChips)} chips • 1 chip = ₹1'),
+              _MetricCard(label: 'DISPLAY BALANCE', value: '${_money(session.walletChips)} CHIPS', helper: 'Social chips only in this build'),
               const SizedBox(height: 12),
               const _PrototypeNotice(),
               const SizedBox(height: 12),
@@ -1354,11 +1354,11 @@ class WithdrawView extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _MetricCard(label: 'AVAILABLE DISPLAY BALANCE', value: '₹${_money(session.walletChips)}', helper: 'Prototype balance only'),
+              _MetricCard(label: 'AVAILABLE DISPLAY BALANCE', value: '${_money(session.walletChips)} CHIPS', helper: 'Prototype balance only'),
               const SizedBox(height: 12),
               const _PrototypeNotice(),
               const SizedBox(height: 12),
-              const TextField(enabled: false, decoration: InputDecoration(labelText: 'Withdrawal amount', prefixText: '₹ ', border: OutlineInputBorder())),
+              const TextField(enabled: false, decoration: InputDecoration(labelText: 'Withdrawal amount', border: OutlineInputBorder())),
               const SizedBox(height: 10),
               FilledButton(onPressed: null, child: const Text('WITHDRAW — NOT ENABLED')),
             ],
@@ -1454,7 +1454,7 @@ class RulesView extends StatelessWidget {
             child: const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _RuleLine('1 chip = ₹1 in the planned cash-wallet model.'),
+                _RuleLine('Current build uses social chips only; cash conversion is disabled.'),
                 _RuleLine('Boot starts at 10 chips.'),
                 _RuleLine('Table limits: 2-5 players = 5K, 6-8 players = 20K, 9-10 players = 50K.'),
                 _RuleLine('Players compete against other players; the server deals the cards.'),
@@ -1697,6 +1697,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   }
 }
 
+
 class TableScreen extends StatefulWidget {
   final String roomId;
   final AppSession session;
@@ -1707,31 +1708,54 @@ class TableScreen extends StatefulWidget {
   State<TableScreen> createState() => _TableScreenState();
 }
 
-class _TableScreenState extends State<TableScreen> {
+class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   Timer? poller;
   Timer? ticker;
   Map<String, dynamic>? state;
   String? error;
   bool busy = false;
+  bool appActive = true;
+  bool reconnecting = false;
+  int serverClockOffsetMs = 0;
   int? recordedRound;
   int? lastRound;
   int lastPot = 0;
   String? lastWinnerId;
+  String? lastTurnPlayerId;
   final AudioPlayer sfxPlayer = AudioPlayer();
   final AudioPlayer musicPlayer = AudioPlayer();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _poll();
-    poller = Timer.periodic(const Duration(milliseconds: 850), (_) => _poll());
-    ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (mounted && state?['status'] == 'playing') setState(() {});
+    poller = Timer.periodic(const Duration(milliseconds: 650), (_) {
+      if (appActive) _poll();
+    });
+    ticker = Timer.periodic(const Duration(milliseconds: 160), (_) {
+      if (mounted && appActive && state?['status'] == 'playing') setState(() {});
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    // iOS can briefly become inactive while a notification/control overlay is shown.
+    // Keep the live table polling in that case; only stop when genuinely backgrounded.
+    appActive = lifecycleState == AppLifecycleState.resumed || lifecycleState == AppLifecycleState.inactive;
+    if (lifecycleState == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      if (mounted) setState(() => reconnecting = true);
+      _poll().whenComplete(() {
+        if (mounted) setState(() => reconnecting = false);
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     poller?.cancel();
     ticker?.cancel();
     sfxPlayer.dispose();
@@ -1763,8 +1787,14 @@ class _TableScreenState extends State<TableScreen> {
     try {
       final s = await Api.get('/state?roomId=${Uri.encodeComponent(widget.roomId)}&playerId=${Uri.encodeComponent(widget.session.playerId)}');
       if (!mounted) return;
-      _handleAudioTransitions(s);
-      setState(() { state = s; error = null; });
+      final localNow = DateTime.now().millisecondsSinceEpoch;
+      final serverNow = s['serverNow'];
+      if (serverNow is int) serverClockOffsetMs = serverNow - localNow;
+      _handleGameTransitions(s);
+      setState(() {
+        state = s;
+        error = null;
+      });
       _syncWallet(s);
       _recordIfComplete(s);
     } catch (e) {
@@ -1772,23 +1802,34 @@ class _TableScreenState extends State<TableScreen> {
     }
   }
 
-  void _handleAudioTransitions(Map<String, dynamic> s) {
+  void _handleGameTransitions(Map<String, dynamic> s) {
     final round = s['round'] as int? ?? 0;
     final pot = s['pot'] as int? ?? 0;
     final winnerId = s['winnerId'] as String?;
+    final turnPlayer = s['currentPlayerId'] as String?;
+
     if (lastRound != null && round != lastRound) _playSfx('card.wav');
     if (lastRound == null && s['status'] == 'playing') _playSfx('card.wav');
     if (pot > lastPot) _playSfx('chips.wav');
-    if (winnerId != null && winnerId != lastWinnerId) _playWin();
+    if (winnerId != null && winnerId != lastWinnerId) {
+      HapticFeedback.heavyImpact();
+      _playWin();
+    }
+    if (turnPlayer == widget.session.playerId && turnPlayer != lastTurnPlayerId) {
+      HapticFeedback.mediumImpact();
+      SystemSound.play(SystemSoundType.click);
+    }
+
     lastRound = round;
     lastPot = pot;
     lastWinnerId = winnerId;
+    lastTurnPlayerId = turnPlayer;
   }
 
   Future<void> _action(String action) async {
     if (busy) return;
+    HapticFeedback.mediumImpact();
     setState(() => busy = true);
-    if (action == 'blind') _playSfx('chips.wav');
     if (action == 'see' || action == 'show' || action == 'sideshow') _playSfx('card.wav');
     try {
       final s = await Api.post('/action', {
@@ -1796,12 +1837,17 @@ class _TableScreenState extends State<TableScreen> {
         'playerId': widget.session.playerId,
         'action': action,
       });
-      if (mounted) {
-        _handleAudioTransitions(s);
-        setState(() { state = s; error = null; });
-        _syncWallet(s);
-        _recordIfComplete(s);
-      }
+      if (!mounted) return;
+      final localNow = DateTime.now().millisecondsSinceEpoch;
+      final serverNow = s['serverNow'];
+      if (serverNow is int) serverClockOffsetMs = serverNow - localNow;
+      _handleGameTransitions(s);
+      setState(() {
+        state = s;
+        error = null;
+      });
+      _syncWallet(s);
+      _recordIfComplete(s);
     } catch (e) {
       if (mounted) setState(() => error = '$e');
     } finally {
@@ -1840,14 +1886,38 @@ class _TableScreenState extends State<TableScreen> {
   int _remainingMs(Map<String, dynamic> s) {
     final raw = s['turnExpiresAt'];
     if (raw is! int || raw <= 0) return 0;
-    return max(0, raw - DateTime.now().millisecondsSinceEpoch);
+    final adjustedNow = DateTime.now().millisecondsSinceEpoch + serverClockOffsetMs;
+    return max(0, raw - adjustedNow);
+  }
+
+  void _goHome() {
+    widget.session.setPage(0);
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   @override
   Widget build(BuildContext context) {
     final s = state;
     if (s == null) {
-      return Scaffold(backgroundColor: ink, body: Center(child: error == null ? const CircularProgressIndicator(color: gold) : Text(error!)));
+      return Scaffold(
+        backgroundColor: const Color(0xFF020604),
+        body: CasinoBackdrop(
+          child: Center(
+            child: error == null
+                ? const CircularProgressIndicator(color: gold)
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_off_rounded, color: Colors.orangeAccent, size: 44),
+                      const SizedBox(height: 10),
+                      Text(error!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      FilledButton(onPressed: _poll, child: const Text('RECONNECT')),
+                    ],
+                  ),
+          ),
+        ),
+      );
     }
 
     final players = (s['players'] as List).cast<Map<String, dynamic>>();
@@ -1865,97 +1935,296 @@ class _TableScreenState extends State<TableScreen> {
     final fraction = (remainingMs / 60000).clamp(0.0, 1.0).toDouble();
     final activeCount = players.where((p) => p['folded'] != true).length;
     final canSideShow = s['canSideShow'] == true;
+    final blindAmount = s['blindAmount'] as int? ?? 10;
+    final chaalAmount = s['chaalAmount'] as int? ?? blindAmount * 2;
 
     return Scaffold(
-      backgroundColor: ink,
-      appBar: AppBar(
-        toolbarHeight: 44,
-        backgroundColor: const Color(0xFF030B08),
-        foregroundColor: gold,
-        titleSpacing: 10,
-        title: Row(
-          children: [
-            const Icon(Icons.casino_rounded, size: 20, color: gold),
-            const SizedBox(width: 7),
-            Text(requestedPlayers == 2 ? '1 VS 1 TABLE' : '$requestedPlayers PLAYER TABLE', style: TextStyle(fontSize: 14, color: palette.accent, fontWeight: FontWeight.w900)),
-          ],
-        ),
-        actions: [
-          Center(child: Text('POT ${s['pot']}', style: const TextStyle(fontSize: 11, color: gold, fontWeight: FontWeight.w900))),
-          const SizedBox(width: 14),
-          Icon(widget.session.soundEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded, size: 18, color: Colors.white54),
-          const SizedBox(width: 10),
-          IconButton(
-            onPressed: () {
-              widget.session.setPage(0);
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            },
-            icon: const Icon(Icons.home_rounded, color: gold, size: 20),
-            tooltip: 'Home',
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
+      backgroundColor: const Color(0xFF010403),
       body: CasinoBackdrop(
         child: SafeArea(
           child: Stack(
             children: [
               Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 74),
-                  child: GameTableArena(
-                    state: s,
-                    session: widget.session,
-                    palette: palette,
-                    currentPlayerId: currentPlayerId,
-                    winnerId: winnerId,
-                    timerFraction: fraction,
-                    timerSeconds: seconds,
-                    myCards: cards,
-                    mySeen: seen,
-                  ),
+                child: GameRoomBackdrop(accent: palette.accent),
+              ),
+              Positioned(
+                left: 8,
+                right: 8,
+                top: 6,
+                height: 44,
+                child: GameTopHud(
+                  requestedPlayers: requestedPlayers,
+                  cap: s['cap'] as int? ?? 0,
+                  chips: widget.session.walletChips,
+                  soundEnabled: widget.session.soundEnabled,
+                  reconnecting: reconnecting,
+                  accent: palette.accent,
+                  onHome: _goHome,
                 ),
               ),
               Positioned(
-                left: 12,
-                right: 12,
-                bottom: 8,
+                left: 5,
+                right: 5,
+                top: 47,
+                bottom: 83,
+                child: GameTableArena(
+                  state: s,
+                  session: widget.session,
+                  palette: palette,
+                  currentPlayerId: currentPlayerId,
+                  winnerId: winnerId,
+                  timerFraction: fraction,
+                  timerSeconds: seconds,
+                  myCards: cards,
+                  mySeen: seen,
+                ),
+              ),
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: 7,
+                height: 72,
                 child: GameActionDock(
                   enabled: isMyTurn && !busy,
                   seen: seen,
                   activeCount: activeCount,
                   canSideShow: canSideShow,
                   busy: busy,
-                  onBlind: () => _action('blind'),
+                  betAmount: seen ? chaalAmount : blindAmount,
+                  onBet: () => _action(seen ? 'chaal' : 'blind'),
                   onSee: () => _action('see'),
                   onPack: () => _action('pack'),
                   onShow: () => _action('show'),
                   onSideShow: () => _action('sideshow'),
                 ),
               ),
+              if (isMyTurn && !showdown)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 78,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: .92, end: 1),
+                        duration: const Duration(milliseconds: 700),
+                        curve: Curves.easeInOut,
+                        builder: (context, v, child) => Transform.scale(scale: v, child: child),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xE6102D20),
+                            borderRadius: BorderRadius.circular(99),
+                            border: Border.all(color: palette.accent.withValues(alpha: .75)),
+                            boxShadow: [BoxShadow(color: palette.accent.withValues(alpha: .25), blurRadius: 12)],
+                          ),
+                          child: const Text('YOUR TURN', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               if (showdown)
                 Positioned.fill(
                   child: WinnerOverlay(
                     won: winnerId == widget.session.playerId,
                     message: '${s['message']}',
                     payout: s['lastPayout'] as int? ?? 0,
-                    onAgain: busy ? null : () { recordedRound = null; _action('new'); },
+                    onAgain: busy
+                        ? null
+                        : () {
+                            recordedRound = null;
+                            _action('new');
+                          },
                   ),
                 ),
               if (error != null)
                 Positioned(
-                  right: 14,
-                  top: 12,
+                  right: 12,
+                  top: 55,
                   child: Container(
-                    constraints: const BoxConstraints(maxWidth: 310),
+                    constraints: const BoxConstraints(maxWidth: 320),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(color: const Color(0xFF6B2919), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.orangeAccent)),
+                    decoration: BoxDecoration(
+                      color: const Color(0xF06B2919),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.orangeAccent),
+                      boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 10)],
+                    ),
                     child: Text(error!, style: const TextStyle(fontSize: 10, color: Colors.white)),
                   ),
                 ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class GameRoomBackdrop extends StatelessWidget {
+  final Color accent;
+  const GameRoomBackdrop({super.key, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: const RadialGradient(
+          center: Alignment(0, -.15),
+          radius: 1.1,
+          colors: [Color(0xFF173227), Color(0xFF07110D), Color(0xFF010302)],
+        ),
+        boxShadow: [BoxShadow(color: accent.withValues(alpha: .06), blurRadius: 60, spreadRadius: 15)],
+      ),
+      child: CustomPaint(painter: _GameRoomPainter(accent)),
+    );
+  }
+}
+
+class _GameRoomPainter extends CustomPainter {
+  final Color accent;
+  const _GameRoomPainter(this.accent);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final floor = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Colors.transparent, accent.withValues(alpha: .04)],
+      ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, floor);
+
+    final rail = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = const Color(0xFFFFD776).withValues(alpha: .05);
+    for (double y = size.height * .15; y < size.height; y += 36) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), rail);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GameRoomPainter oldDelegate) => oldDelegate.accent != accent;
+}
+
+class GameTopHud extends StatelessWidget {
+  final int requestedPlayers;
+  final int cap;
+  final int chips;
+  final bool soundEnabled;
+  final bool reconnecting;
+  final Color accent;
+  final VoidCallback onHome;
+
+  const GameTopHud({
+    super.key,
+    required this.requestedPlayers,
+    required this.cap,
+    required this.chips,
+    required this.soundEnabled,
+    required this.reconnecting,
+    required this.accent,
+    required this.onHome,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _HudIconButton(icon: Icons.home_rounded, onTap: onHome),
+        const SizedBox(width: 8),
+        Container(
+          height: 39,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: const Color(0xD909120D),
+            border: Border.all(color: accent.withValues(alpha: .55)),
+            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 8)],
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.casino_rounded, color: accent, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                requestedPlayers == 2 ? '1 VS 1' : '$requestedPlayers PLAYER',
+                style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: .5),
+              ),
+              const SizedBox(width: 7),
+              Container(width: 1, height: 16, color: Colors.white12),
+              const SizedBox(width: 7),
+              Text('LIMIT ${_shortLimit(cap)}', style: const TextStyle(fontSize: 8.5, color: Colors.white54, fontWeight: FontWeight.w900)),
+            ],
+          ),
+        ),
+        const Spacer(),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          height: 35,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: reconnecting ? const Color(0xD95B3A0B) : const Color(0xD90C2819),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: reconnecting ? Colors.amberAccent.withValues(alpha: .45) : Colors.greenAccent.withValues(alpha: .28)),
+          ),
+          child: Row(
+            children: [
+              Icon(reconnecting ? Icons.sync_rounded : Icons.wifi_rounded, size: 15, color: reconnecting ? Colors.amberAccent : Colors.greenAccent),
+              const SizedBox(width: 5),
+              Text(reconnecting ? 'SYNCING' : 'LIVE', style: const TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: .7)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          height: 39,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xDF0B120E),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF8F6B21)),
+          ),
+          child: Row(
+            children: [
+              const CasinoChip(color: Color(0xFFE5B62C), size: 22),
+              const SizedBox(width: 6),
+              Text('${_money(chips)} CHIPS', style: const TextStyle(fontSize: 10, color: Color(0xFFFFE2A0), fontWeight: FontWeight.w900)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          width: 35,
+          height: 35,
+          decoration: BoxDecoration(color: const Color(0xD90A120E), borderRadius: BorderRadius.circular(13), border: Border.all(color: Colors.white12)),
+          child: Icon(soundEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded, size: 17, color: Colors.white60),
+        ),
+      ],
+    );
+  }
+}
+
+class _HudIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _HudIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(13),
+      child: Ink(
+        width: 39,
+        height: 39,
+        decoration: BoxDecoration(
+          color: const Color(0xDD0A120E),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: const Color(0xFF876820)),
+        ),
+        child: Icon(icon, color: gold, size: 19),
       ),
     );
   }
@@ -1993,51 +2262,44 @@ class GameTableArena extends StatelessWidget {
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         final h = constraints.maxHeight;
-        final tableW = w * .70;
-        final tableH = h * .64;
-        final center = Offset(w / 2, h * .52);
-        final rx = tableW * .48;
-        final ry = tableH * .50;
-        const seatW = 112.0;
-        const seatH = 64.0;
+        final dense = players.length >= 7 || h < 240;
+        final seatW = dense ? 104.0 : 120.0;
+        final seatH = dense ? 59.0 : 68.0;
+        final tableW = min(w * .88, 900.0);
+        final tableH = min(h * .72, 300.0);
+        final center = Offset(w / 2, h * .50);
+        final rx = tableW * .49;
+        final ry = tableH * .52;
+        final dealerW = dense ? 105.0 : 124.0;
+        final dealerH = dense ? 75.0 : 90.0;
+        final dealerTop = max(0.0, center.dy - tableH / 2 - dealerH * .43);
+        final dealerCenter = Offset(center.dx, dealerTop + dealerH * .57);
+        final seatCenters = <String, Offset>{};
         final children = <Widget>[
           Positioned(
             left: center.dx - tableW / 2,
             top: center.dy - tableH / 2,
             width: tableW,
             height: tableH,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(tableH / 2),
-                gradient: const RadialGradient(
-                  center: Alignment.center,
-                  radius: 1.05,
-                  colors: [Color(0xFF177A4E), Color(0xFF0B4B31), Color(0xFF05291B)],
-                ),
-                border: Border.all(color: const Color(0xFFE4B849), width: 4),
-                boxShadow: const [
-                  BoxShadow(color: Color(0xAA000000), blurRadius: 28, offset: Offset(0, 12)),
-                  BoxShadow(color: Color(0x448A5A00), blurRadius: 14, spreadRadius: 2),
-                ],
-              ),
-              child: CustomPaint(painter: _TableFeltPainter()),
-            ),
+            child: PremiumTeenPattiTable(accent: palette.accent),
           ),
           Positioned(
-            left: center.dx - 73,
-            top: center.dy - 56,
-            width: 146,
+            left: center.dx - 105,
+            top: center.dy - 58,
+            width: 210,
             child: PotCenter(
               pot: state['pot'] as int? ?? 0,
-              bet: state['currentBet'] as int? ?? 10,
+              blindAmount: state['blindAmount'] as int? ?? 10,
+              chaalAmount: state['chaalAmount'] as int? ?? 20,
               cap: state['cap'] as int? ?? 0,
             ),
           ),
           Positioned(
-            left: center.dx - 48,
-            top: max(2.0, center.dy - tableH / 2 - 58),
-            width: 96,
-            child: const DealerLady(),
+            left: center.dx - dealerW / 2,
+            top: dealerTop,
+            width: dealerW,
+            height: dealerH,
+            child: DealerHost(compact: dense),
           ),
         ];
 
@@ -2045,48 +2307,115 @@ class GameTableArena extends StatelessWidget {
           final p = players[i];
           final relative = (i - meIndex + players.length) % players.length;
           final angle = pi / 2 + (2 * pi * relative / players.length);
-          var left = center.dx + cos(angle) * rx - seatW / 2;
-          var top = center.dy + sin(angle) * ry - seatH / 2;
+          var seatCenter = Offset(center.dx + cos(angle) * rx, center.dy + sin(angle) * ry);
+
+          // Keep the dealer clear, especially for 1 VS 1 where the opponent would otherwise be directly behind her.
+          if (seatCenter.dy < center.dy - tableH * .27 && (seatCenter.dx - center.dx).abs() < seatW * .75) {
+            seatCenter = Offset(center.dx + (relative.isEven ? tableW * .26 : -tableW * .26), seatCenter.dy + 3);
+          }
+
+          var left = seatCenter.dx - seatW / 2;
+          var top = seatCenter.dy - seatH / 2;
           left = left.clamp(2.0, w - seatW - 2).toDouble();
-          top = top.clamp(4.0, h - seatH - 4).toDouble();
-          children.add(Positioned(
-            left: left,
-            top: top,
-            width: seatW,
-            height: seatH,
-            child: PlayerSeat(
-              player: p,
-              isMe: p['id'] == session.playerId,
-              isTurn: p['id'] == currentPlayerId,
-              isWinner: p['id'] == winnerId,
-              timerFraction: p['id'] == currentPlayerId ? timerFraction : 0,
-              timerSeconds: p['id'] == currentPlayerId ? timerSeconds : 0,
-              accent: palette.accent,
+          top = top.clamp(3.0, h - seatH - 3).toDouble();
+          final finalCenter = Offset(left + seatW / 2, top + seatH / 2);
+          seatCenters['${p['id']}'] = finalCenter;
+
+          children.add(
+            Positioned(
+              left: left,
+              top: top,
+              width: seatW,
+              height: seatH,
+              child: PlayerSeat(
+                player: p,
+                isMe: p['id'] == session.playerId,
+                isTurn: p['id'] == currentPlayerId,
+                isWinner: p['id'] == winnerId,
+                timerFraction: p['id'] == currentPlayerId ? timerFraction : 0,
+                timerSeconds: p['id'] == currentPlayerId ? timerSeconds : 0,
+                accent: palette.accent,
+                compact: dense,
+              ),
             ),
-          ));
+          );
+
+          if (p['id'] != session.playerId && p['folded'] != true) {
+            final vector = center - finalCenter;
+            final length = max(1.0, vector.distance);
+            final towardCenter = Offset(vector.dx / length * (dense ? 35 : 42), vector.dy / length * (dense ? 35 : 42));
+            final cardCenter = finalCenter + towardCenter;
+            children.add(
+              Positioned(
+                left: cardCenter.dx - 24,
+                top: cardCenter.dy - 17,
+                width: 48,
+                height: 34,
+                child: const SeatCardFan(),
+              ),
+            );
+          }
         }
 
-        // Dealer-to-player dealing animation: the local hand drops from dealer toward the bottom seat.
-        children.add(Positioned(
-          left: center.dx - 104,
-          bottom: 4,
-          width: 208,
-          height: 78,
-          child: AnimatedDealHand(cards: myCards, faceUp: mySeen, round: state['round'] as int? ?? 0),
-        ));
-
-        children.add(Positioned(
-          left: center.dx - 210,
-          top: center.dy + tableH * .23,
-          width: 420,
-          child: Text(
-            '${state['message']}',
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10.5, color: Color(0xFFEEDFB5), fontWeight: FontWeight.w700, shadows: [Shadow(color: Colors.black, blurRadius: 5)]),
+        children.add(
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DealerDealLayer(
+                key: ValueKey('deal-all-${state['round']}'),
+                from: dealerCenter,
+                destinations: seatCenters.values.toList(),
+              ),
+            ),
           ),
-        ));
+        );
+
+        final lastAction = '${state['lastAction'] ?? ''}';
+        final actorId = '${state['lastActorId'] ?? ''}';
+        final lastBetAmount = state['lastBetAmount'] as int? ?? 0;
+        final actorCenter = seatCenters[actorId];
+        if ((lastAction == 'blind' || lastAction == 'chaal') && actorCenter != null && lastBetAmount > 0) {
+          children.add(
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ChipFlightLayer(
+                  key: ValueKey('chips-${state['actionSeq']}'),
+                  from: actorCenter,
+                  to: center + const Offset(0, 5),
+                  amount: lastBetAmount,
+                ),
+              ),
+            ),
+          );
+        }
+
+        // Your hand is placed on the felt in front of your seat, not in a generic panel.
+        children.add(
+          Positioned(
+            left: center.dx - (dense ? 88 : 112),
+            top: center.dy + tableH * .24,
+            width: dense ? 176 : 224,
+            height: dense ? 68 : 86,
+            child: AnimatedDealHand(
+              cards: myCards,
+              faceUp: mySeen,
+              round: state['round'] as int? ?? 0,
+              compact: dense,
+            ),
+          ),
+        );
+
+        children.add(
+          Positioned(
+            left: center.dx - min(220.0, w * .30),
+            top: center.dy + tableH * .10,
+            width: min(440.0, w * .60),
+            child: TableMessageBanner(
+              message: '${state['message']}',
+              actionSeq: state['actionSeq'] as int? ?? 0,
+              accent: palette.accent,
+            ),
+          ),
+        );
 
         return Stack(clipBehavior: Clip.none, children: children);
       },
@@ -2094,106 +2423,412 @@ class GameTableArena extends StatelessWidget {
   }
 }
 
-class _TableFeltPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final line = Paint()
-      ..color = const Color(0xFFFFD86B).withValues(alpha: .04)
-      ..strokeWidth = .7;
-    for (double x = -size.height; x < size.width; x += 26) {
-      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), line);
-      canvas.drawLine(Offset(x + size.height, 0), Offset(x, size.height), line);
-    }
-    final inner = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2
-      ..color = const Color(0xFFFFD86B).withValues(alpha: .22);
-    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(18, 18, size.width - 36, size.height - 36), Radius.circular(size.height / 2)), inner);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class DealerLady extends StatelessWidget {
-  const DealerLady({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(colors: [Color(0xFF5A1C2A), Color(0xFF1C0A0F)]),
-            border: Border.all(color: gold, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
-          ),
-          child: const Text('👩🏻‍💼', style: TextStyle(fontSize: 32)),
-        ),
-        const SizedBox(height: 2),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
-          decoration: BoxDecoration(color: const Color(0xDD120B06), borderRadius: BorderRadius.circular(99), border: Border.all(color: const Color(0xFF8B6417))),
-          child: const Text('DEALER', style: TextStyle(fontSize: 8, color: gold, fontWeight: FontWeight.w900, letterSpacing: .7)),
-        ),
-      ],
-    );
-  }
-}
-
-class PotCenter extends StatelessWidget {
-  final int pot;
-  final int bet;
-  final int cap;
-
-  const PotCenter({super.key, required this.pot, required this.bet, required this.cap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          height: 30,
-          child: Stack(
-            alignment: Alignment.center,
-            children: const [
-              Positioned(left: 36, child: _ChipDot(color: Color(0xFFE34134))),
-              Positioned(left: 55, child: _ChipDot(color: Color(0xFF1D78D3))),
-              Positioned(left: 74, child: _ChipDot(color: Color(0xFFE3AF2E))),
-            ],
-          ),
-        ),
-        Text('$pot', style: const TextStyle(fontSize: 28, height: .9, color: gold, fontWeight: FontWeight.w900, shadows: [Shadow(color: Colors.black, blurRadius: 7)])),
-        const Text('POT CHIPS', style: TextStyle(fontSize: 8, color: Colors.white70, fontWeight: FontWeight.w900, letterSpacing: 1)),
-        const SizedBox(height: 3),
-        Text('Blind $bet  •  Limit ${_shortLimit(cap)}', style: const TextStyle(fontSize: 8.5, color: Colors.white54, fontWeight: FontWeight.w700)),
-      ],
-    );
-  }
-}
-
-class _ChipDot extends StatelessWidget {
-  final Color color;
-  const _ChipDot({required this.color});
+class PremiumTeenPattiTable extends StatelessWidget {
+  final Color accent;
+  const PremiumTeenPattiTable({super.key, required this.accent});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 27,
-      height: 27,
       decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color,
-        border: Border.all(color: const Color(0xFFFFE7A5), width: 2),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 5, offset: Offset(0, 3))],
+        borderRadius: BorderRadius.circular(999),
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF4A2D12), Color(0xFF171009), Color(0xFF070503)],
+          stops: [0, .55, 1],
+        ),
+        border: Border.all(color: const Color(0xFFB7882C), width: 3.5),
+        boxShadow: [
+          const BoxShadow(color: Color(0xD9000000), blurRadius: 30, offset: Offset(0, 15)),
+          BoxShadow(color: accent.withValues(alpha: .10), blurRadius: 28, spreadRadius: 2),
+        ],
       ),
-      child: const Icon(Icons.circle, size: 7, color: Colors.white70),
+      padding: const EdgeInsets.all(10),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          gradient: const RadialGradient(
+            center: Alignment(0, -.15),
+            radius: 1.05,
+            colors: [Color(0xFF18805A), Color(0xFF0A5A3B), Color(0xFF03311F)],
+          ),
+          border: Border.all(color: const Color(0xFFFFD875).withValues(alpha: .72), width: 2),
+          boxShadow: const [BoxShadow(color: Color(0x80000000), blurRadius: 12)],
+        ),
+        child: CustomPaint(painter: _PremiumFeltPainter(accent)),
+      ),
+    );
+  }
+}
+
+class _PremiumFeltPainter extends CustomPainter {
+  final Color accent;
+  const _PremiumFeltPainter(this.accent);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fiber = Paint()
+      ..color = Colors.white.withValues(alpha: .018)
+      ..strokeWidth = .55;
+    for (double x = -size.height; x < size.width; x += 16) {
+      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), fiber);
+    }
+
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = const Color(0xFFFFD875).withValues(alpha: .28);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(18, 18, size.width - 36, size.height - 36), Radius.circular(size.height / 2)),
+      ring,
+    );
+
+    final centerGlow = Paint()
+      ..shader = RadialGradient(
+        colors: [accent.withValues(alpha: .08), Colors.transparent],
+      ).createShader(Rect.fromCircle(center: Offset(size.width / 2, size.height / 2), radius: size.width * .25));
+    canvas.drawRect(Offset.zero & size, centerGlow);
+
+    final textPainter = TextPainter(
+      text: const TextSpan(
+        text: '3 PATTI',
+        style: TextStyle(fontSize: 31, color: Color(0x15FFF0B8), fontWeight: FontWeight.w900, letterSpacing: 5),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    textPainter.paint(canvas, Offset((size.width - textPainter.width) / 2, (size.height - textPainter.height) / 2 - 1));
+  }
+
+  @override
+  bool shouldRepaint(covariant _PremiumFeltPainter oldDelegate) => oldDelegate.accent != accent;
+}
+
+class DealerHost extends StatelessWidget {
+  final bool compact;
+  const DealerHost({super.key, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final face = compact ? 42.0 : 50.0;
+    return Stack(
+      alignment: Alignment.topCenter,
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          top: compact ? 28 : 34,
+          child: Container(
+            width: compact ? 82 : 96,
+            height: compact ? 48 : 56,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(colors: [Color(0xFFB21F42), Color(0xFF681227)]),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(46), bottom: Radius.circular(12)),
+              boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 8)],
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          child: Container(
+            width: face,
+            height: face,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(colors: [Color(0xFF2D1514), Color(0xFF080505)]),
+              border: Border.all(color: const Color(0xFFFFD875), width: 2),
+              boxShadow: const [BoxShadow(color: Colors.black87, blurRadius: 10)],
+            ),
+            child: Center(
+              child: Container(
+                width: face * .70,
+                height: face * .70,
+                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFFD1B5)),
+                child: Icon(Icons.face_3_rounded, color: const Color(0xFF6B2D2F), size: compact ? 25 : 30),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: compact ? 7 : 9,
+          bottom: compact ? 9 : 11,
+          child: Transform.rotate(
+            angle: -.35,
+            child: const _DealerHandWithDeck(),
+          ),
+        ),
+        Positioned(
+          right: compact ? 8 : 10,
+          bottom: compact ? 13 : 15,
+          child: Transform.rotate(
+            angle: .28,
+            child: Container(
+              width: compact ? 29 : 34,
+              height: 8,
+              decoration: BoxDecoration(color: const Color(0xFFFFC5A4), borderRadius: BorderRadius.circular(99)),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xF2150B08),
+              borderRadius: BorderRadius.circular(99),
+              border: Border.all(color: const Color(0xFFA87D26)),
+            ),
+            child: const Text('DEALER', style: TextStyle(fontSize: 7, color: gold, fontWeight: FontWeight.w900, letterSpacing: 1)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DealerHandWithDeck extends StatelessWidget {
+  const _DealerHandWithDeck();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 27, height: 8, decoration: BoxDecoration(color: const Color(0xFFFFC5A4), borderRadius: BorderRadius.circular(99))),
+        Transform.rotate(
+          angle: .18,
+          child: Container(
+            width: 20,
+            height: 28,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFFB3213E), Color(0xFF5E0D1D)]),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: const Color(0xFFFFD875)),
+              boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4)],
+            ),
+            child: const Icon(Icons.diamond_outlined, size: 10, color: Color(0xFFFFD875)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class DealerDealLayer extends StatelessWidget {
+  final Offset from;
+  final List<Offset> destinations;
+
+  const DealerDealLayer({super.key, required this.from, required this.destinations});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 1350 + destinations.length * 80),
+      curve: Curves.linear,
+      builder: (context, progress, _) => CustomPaint(
+        painter: _DealerDealPainter(from: from, destinations: destinations, progress: progress),
+      ),
+    );
+  }
+}
+
+class _DealerDealPainter extends CustomPainter {
+  final Offset from;
+  final List<Offset> destinations;
+  final double progress;
+
+  const _DealerDealPainter({required this.from, required this.destinations, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (destinations.isEmpty) return;
+    final total = destinations.length * 3;
+    for (var cardIndex = 0; cardIndex < 3; cardIndex++) {
+      for (var i = 0; i < destinations.length; i++) {
+        final order = cardIndex * destinations.length + i;
+        final delay = order / max(1, total) * .73;
+        final local = ((progress - delay) / .25).clamp(0.0, 1.0);
+        if (local <= 0 || local >= 1) continue;
+        final eased = Curves.easeOutCubic.transform(local);
+        final target = destinations[i];
+        final mid = Offset((from.dx + target.dx) / 2, min(from.dy, target.dy) - 22 - cardIndex * 4);
+        final a = Offset.lerp(from, mid, eased)!;
+        final b = Offset.lerp(mid, target, eased)!;
+        final point = Offset.lerp(a, b, eased)!;
+        final alpha = (1 - (local - .82).clamp(0.0, .18) / .18).clamp(0.0, 1.0);
+        canvas.save();
+        canvas.translate(point.dx, point.dy);
+        canvas.rotate((target.dx - from.dx) * .0017 + (cardIndex - 1) * .07 + local * .1);
+        final rect = RRect.fromRectAndRadius(const Rect.fromLTWH(-8, -11, 16, 22), const Radius.circular(3));
+        canvas.drawRRect(rect, Paint()..color = const Color(0xFFA11634).withValues(alpha: alpha));
+        canvas.drawRRect(rect, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.1..color = const Color(0xFFFFDB80).withValues(alpha: alpha));
+        canvas.drawCircle(Offset.zero, 2.4, Paint()..color = Colors.white.withValues(alpha: .48 * alpha));
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DealerDealPainter oldDelegate) => oldDelegate.progress != progress || oldDelegate.destinations != destinations || oldDelegate.from != from;
+}
+
+class PotCenter extends StatelessWidget {
+  final int pot;
+  final int blindAmount;
+  final int chaalAmount;
+  final int cap;
+
+  const PotCenter({super.key, required this.pot, required this.blindAmount, required this.chaalAmount, required this.cap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          height: 47,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned(left: 27, top: 17, child: CasinoChipStack(color: Color(0xFFE6453B), count: 3)),
+              Positioned(left: 57, top: 8, child: CasinoChipStack(color: Color(0xFF2D80DF), count: 5)),
+              Positioned(left: 88, top: 14, child: CasinoChipStack(color: Color(0xFF39A94B), count: 4)),
+              Positioned(left: 119, top: 5, child: CasinoChipStack(color: Color(0xFFE7B62C), count: 5)),
+              Positioned(left: 150, top: 15, child: CasinoChipStack(color: Color(0xFF8A4FD0), count: 3)),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xC9081A12),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: const Color(0xFFFFD875).withValues(alpha: .48)),
+            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 7)],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('POT', style: TextStyle(fontSize: 8, color: Colors.white60, fontWeight: FontWeight.w900, letterSpacing: 1)),
+              const SizedBox(width: 7),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Text('$pot', key: ValueKey(pot), style: const TextStyle(fontSize: 19, color: gold, fontWeight: FontWeight.w900)),
+              ),
+              const SizedBox(width: 5),
+              const Text('CHIPS', style: TextStyle(fontSize: 8, color: Colors.white60, fontWeight: FontWeight.w900)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text('BLIND $blindAmount  •  SEEN $chaalAmount  •  LIMIT ${_shortLimit(cap)}', style: const TextStyle(fontSize: 7.6, color: Colors.white54, fontWeight: FontWeight.w900)),
+      ],
+    );
+  }
+}
+
+class CasinoChipStack extends StatelessWidget {
+  final Color color;
+  final int count;
+  const CasinoChipStack({super.key, required this.color, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 31,
+      height: 38,
+      child: Stack(
+        children: List.generate(count, (i) => Positioned(bottom: i * 3.0, child: CasinoChip(color: color, size: 29))),
+      ),
+    );
+  }
+}
+
+class CasinoChip extends StatelessWidget {
+  final Color color;
+  final double size;
+  const CasinoChip({super.key, required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(width: size, height: size, child: CustomPaint(painter: _CasinoChipPainter(color)));
+  }
+}
+
+class _CasinoChipPainter extends CustomPainter {
+  final Color color;
+  const _CasinoChipPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2 - 1;
+    canvas.drawCircle(c, r, Paint()..color = Colors.black.withValues(alpha: .45));
+    canvas.drawCircle(c, r - 1, Paint()..color = color);
+    canvas.drawCircle(c, r * .68, Paint()..color = const Color(0xFF151515));
+    canvas.drawCircle(c, r * .49, Paint()..color = color.withValues(alpha: .92));
+    final edge = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(1.4, size.width * .07)
+      ..color = Colors.white.withValues(alpha: .88);
+    for (var i = 0; i < 8; i++) {
+      final a = i * pi / 4;
+      canvas.drawArc(Rect.fromCircle(center: c, radius: r * .84), a, .22, false, edge);
+    }
+    canvas.drawCircle(c, r, Paint()..style = PaintingStyle.stroke..strokeWidth = 1..color = const Color(0xFFFFE4A0).withValues(alpha: .55));
+  }
+
+  @override
+  bool shouldRepaint(covariant _CasinoChipPainter oldDelegate) => oldDelegate.color != color;
+}
+
+class ChipFlightLayer extends StatelessWidget {
+  final Offset from;
+  final Offset to;
+  final int amount;
+
+  const ChipFlightLayer({super.key, required this.from, required this.to, required this.amount});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 720),
+      curve: Curves.easeInOutCubic,
+      builder: (context, value, _) {
+        final mid = Offset((from.dx + to.dx) / 2, min(from.dy, to.dy) - 55);
+        final a = Offset.lerp(from, mid, value)!;
+        final b = Offset.lerp(mid, to, value)!;
+        final point = Offset.lerp(a, b, value)!;
+        return Stack(
+          children: [
+            Positioned(
+              left: point.dx - 18,
+              top: point.dy - 18,
+              child: Transform.rotate(
+                angle: value * pi * 2.8,
+                child: const Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    CasinoChip(color: Color(0xFFE84B3C), size: 30),
+                    Positioned(left: 9, top: 5, child: CasinoChip(color: Color(0xFF2C83DF), size: 27)),
+                    Positioned(left: 17, top: 10, child: CasinoChip(color: Color(0xFFE4B530), size: 23)),
+                  ],
+                ),
+              ),
+            ),
+            if (value > .42 && value < .92)
+              Positioned(
+                left: point.dx + 20,
+                top: point.dy - 10,
+                child: Opacity(
+                  opacity: (1 - ((value - .42) / .5)).clamp(0.0, 1.0),
+                  child: Text('$amount', style: const TextStyle(fontSize: 11, color: gold, fontWeight: FontWeight.w900, shadows: [Shadow(color: Colors.black, blurRadius: 5)])),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -2206,6 +2841,7 @@ class PlayerSeat extends StatelessWidget {
   final double timerFraction;
   final int timerSeconds;
   final Color accent;
+  final bool compact;
 
   const PlayerSeat({
     super.key,
@@ -2216,6 +2852,7 @@ class PlayerSeat extends StatelessWidget {
     required this.timerFraction,
     required this.timerSeconds,
     required this.accent,
+    required this.compact,
   });
 
   @override
@@ -2224,106 +2861,203 @@ class PlayerSeat extends StatelessWidget {
     final seen = player['seen'] == true;
     final name = '${player['name'] ?? 'Player'}';
     final initial = name.trim().isEmpty ? '?' : name.trim().substring(0, 1).toUpperCase();
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      padding: const EdgeInsets.all(5),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: const Color(0xE508100C),
-        border: Border.all(color: isWinner ? gold : (isTurn ? accent : const Color(0xFF675520)), width: isTurn || isWinner ? 2 : 1),
-        boxShadow: [BoxShadow(color: (isTurn ? accent : Colors.black).withValues(alpha: isTurn ? .28 : .35), blurRadius: isTurn ? 16 : 7)],
-      ),
-      child: Row(
+    final avatarSize = compact ? 35.0 : 41.0;
+    return AnimatedScale(
+      duration: const Duration(milliseconds: 180),
+      scale: isTurn ? 1.055 : 1,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          SizedBox(
-            width: 44,
-            height: 44,
-            child: Stack(
-              alignment: Alignment.center,
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            padding: EdgeInsets.fromLTRB(compact ? 5 : 6, compact ? 5 : 6, compact ? 6 : 8, compact ? 5 : 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              gradient: LinearGradient(
+                colors: isTurn
+                    ? [const Color(0xF21C3B2A), const Color(0xF208100C)]
+                    : [const Color(0xEA0D1711), const Color(0xEA040806)],
+              ),
+              border: Border.all(
+                color: isWinner ? gold : (isTurn ? accent : const Color(0xFF705A27)),
+                width: isTurn || isWinner ? 2 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(color: (isTurn ? accent : Colors.black).withValues(alpha: isTurn ? .38 : .42), blurRadius: isTurn ? 17 : 8),
+              ],
+            ),
+            child: Row(
               children: [
-                CustomPaint(size: const Size(44, 44), painter: _TurnRingPainter(fraction: isTurn ? timerFraction : 0, active: isTurn, accent: accent)),
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: avatarSize,
+                  height: avatarSize,
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(shape: BoxShape.circle, gradient: const LinearGradient(colors: [Color(0xFF4C3B17), Color(0xFF151009)]), border: Border.all(color: isMe ? gold : Colors.white24)),
-                  child: Text(initial, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFFFFE4A1))),
-                ),
-                if (isTurn)
-                  Positioned(
-                    bottom: -1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(color: timerSeconds <= 10 ? const Color(0xFF9B251E) : const Color(0xFF123F24), borderRadius: BorderRadius.circular(99)),
-                      child: Text('${timerSeconds}s', style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900)),
-                    ),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(colors: [Color(0xFF6E5220), Color(0xFF21150B)]),
+                    border: Border.all(color: isMe ? gold : Colors.white24, width: isMe ? 1.5 : 1),
+                    boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 5)],
                   ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: Text(isMe ? '$name • YOU' : name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900))),
-                    if (isWinner) const Icon(Icons.emoji_events_rounded, color: gold, size: 13),
-                  ],
+                  child: Text(initial, style: TextStyle(fontSize: compact ? 13 : 15, color: const Color(0xFFFFE5A4), fontWeight: FontWeight.w900)),
                 ),
-                const SizedBox(height: 2),
-                Text('${player['chips']} chips', style: const TextStyle(fontSize: 8.5, color: Colors.white54, fontWeight: FontWeight.w700)),
-                Text(folded ? 'PACKED' : (seen ? 'SEEN' : 'BLIND'), style: TextStyle(fontSize: 7.5, color: folded ? Colors.redAccent : (seen ? Colors.lightBlueAccent : Colors.lightGreenAccent), fontWeight: FontWeight.w900)),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              isMe ? '$name • YOU' : name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: compact ? 8.4 : 9.4, color: Colors.white, fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          if (isWinner) const Icon(Icons.emoji_events_rounded, color: gold, size: 12),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const CasinoChip(color: Color(0xFFE4B530), size: 12),
+                          const SizedBox(width: 3),
+                          Expanded(
+                            child: Text(
+                              '${_money(player['chips'] as int? ?? 0)} CHIPS',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: compact ? 7.2 : 8.2, color: const Color(0xFFFFDEA0), fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      _PlayerStatusPill(folded: folded, seen: seen, compact: compact),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
-          if (!isMe) const MiniCardBacks(),
+          if (isTurn)
+            Positioned(
+              right: compact ? -22 : -25,
+              top: compact ? 5 : 6,
+              child: TurnTimerBadge(
+                seconds: timerSeconds,
+                fraction: timerFraction,
+                accent: accent,
+                size: compact ? 42 : 48,
+              ),
+            ),
+          if (isTurn)
+            Positioned(
+              left: 8,
+              bottom: compact ? -8 : -9,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: .92),
+                  borderRadius: BorderRadius.circular(99),
+                  boxShadow: [BoxShadow(color: accent.withValues(alpha: .32), blurRadius: 8)],
+                ),
+                child: const Text('TURN', style: TextStyle(fontSize: 6.5, color: Colors.black, fontWeight: FontWeight.w900, letterSpacing: .8)),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _TurnRingPainter extends CustomPainter {
-  final double fraction;
-  final bool active;
-  final Color accent;
-
-  const _TurnRingPainter({required this.fraction, required this.active, required this.accent});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 2;
-    final track = Paint()..style = PaintingStyle.stroke..strokeWidth = 3..color = Colors.white12;
-    canvas.drawCircle(center, radius, track);
-    if (!active) return;
-    final color = fraction < .18 ? Colors.redAccent : (fraction < .4 ? Colors.amberAccent : accent);
-    final progress = Paint()..style = PaintingStyle.stroke..strokeWidth = 3.4..strokeCap = StrokeCap.round..color = color;
-    canvas.drawArc(Rect.fromCircle(center: center, radius: radius), -pi / 2, 2 * pi * fraction, false, progress);
-  }
-
-  @override
-  bool shouldRepaint(covariant _TurnRingPainter oldDelegate) => oldDelegate.fraction != fraction || oldDelegate.active != active || oldDelegate.accent != accent;
-}
-
-class MiniCardBacks extends StatelessWidget {
-  const MiniCardBacks({super.key});
+class _PlayerStatusPill extends StatelessWidget {
+  final bool folded;
+  final bool seen;
+  final bool compact;
+  const _PlayerStatusPill({required this.folded, required this.seen, required this.compact});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 24,
-      height: 34,
-      child: Stack(
-        children: [
-          Positioned(left: 0, top: 4, child: Transform.rotate(angle: -.18, child: const _MiniBack())),
-          Positioned(left: 5, top: 2, child: const _MiniBack()),
-          Positioned(left: 10, top: 4, child: Transform.rotate(angle: .18, child: const _MiniBack())),
-        ],
+    final label = folded ? 'PACKED' : (seen ? 'SEEN' : 'BLIND');
+    final color = folded ? Colors.redAccent : (seen ? Colors.lightBlueAccent : Colors.lightGreenAccent);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(99), border: Border.all(color: color.withValues(alpha: .20))),
+      child: Text(label, style: TextStyle(fontSize: compact ? 6.5 : 7.2, color: color, fontWeight: FontWeight.w900, letterSpacing: .45)),
+    );
+  }
+}
+
+class TurnTimerBadge extends StatelessWidget {
+  final int seconds;
+  final double fraction;
+  final Color accent;
+  final double size;
+
+  const TurnTimerBadge({super.key, required this.seconds, required this.fraction, required this.accent, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final danger = seconds <= 10;
+    final color = danger ? Colors.redAccent : (seconds <= 25 ? Colors.amberAccent : accent);
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xEF040806), boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 8)]),
+      child: CustomPaint(
+        painter: _TurnTimerPainter(fraction: fraction, color: color),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('$seconds', style: TextStyle(fontSize: size * .32, height: 1, color: Colors.white, fontWeight: FontWeight.w900)),
+              Text('SEC', style: TextStyle(fontSize: size * .12, height: 1.1, color: color, fontWeight: FontWeight.w900, letterSpacing: .5)),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _TurnTimerPainter extends CustomPainter {
+  final double fraction;
+  final Color color;
+  const _TurnTimerPainter({required this.fraction, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2 - 3;
+    canvas.drawCircle(c, r, Paint()..style = PaintingStyle.stroke..strokeWidth = 4..color = Colors.white12);
+    canvas.drawArc(
+      Rect.fromCircle(center: c, radius: r),
+      -pi / 2,
+      2 * pi * fraction,
+      false,
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 4.2..strokeCap = StrokeCap.round..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _TurnTimerPainter oldDelegate) => oldDelegate.fraction != fraction || oldDelegate.color != color;
+}
+
+class SeatCardFan extends StatelessWidget {
+  const SeatCardFan({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Positioned(left: 7, top: 7, child: Transform.rotate(angle: -.20, child: const _MiniBack())),
+        const Positioned(left: 17, top: 3, child: _MiniBack()),
+        Positioned(left: 27, top: 7, child: Transform.rotate(angle: .20, child: const _MiniBack())),
+      ],
     );
   }
 }
@@ -2334,13 +3068,15 @@ class _MiniBack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 14,
-      height: 22,
+      width: 20,
+      height: 29,
       decoration: BoxDecoration(
-        color: const Color(0xFF8B1725),
-        borderRadius: BorderRadius.circular(3),
-        border: Border.all(color: const Color(0xFFE3BC66), width: .7),
+        gradient: const LinearGradient(colors: [Color(0xFFB51B3A), Color(0xFF651022)]),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0xFFEBC96F), width: .8),
+        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 3)],
       ),
+      child: const Center(child: Icon(Icons.diamond_outlined, size: 8, color: Color(0xFFFFDA82))),
     );
   }
 }
@@ -2349,25 +3085,71 @@ class AnimatedDealHand extends StatelessWidget {
   final List<Map<String, dynamic>> cards;
   final bool faceUp;
   final int round;
+  final bool compact;
 
-  const AnimatedDealHand({super.key, required this.cards, required this.faceUp, required this.round});
+  const AnimatedDealHand({super.key, required this.cards, required this.faceUp, required this.round, required this.compact});
 
   @override
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
-      key: ValueKey('deal-$round-$faceUp'),
+      key: ValueKey('my-hand-$round-$faceUp'),
       tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 720),
+      duration: Duration(milliseconds: faceUp ? 520 : 900),
       curve: Curves.easeOutBack,
       builder: (context, value, child) {
+        final flip = faceUp ? (1 - value) * pi * .42 : 0.0;
         return Transform.translate(
-          offset: Offset(0, -90 * (1 - value)),
-          child: Transform.scale(scale: .72 + .28 * value, child: Opacity(opacity: value.clamp(0.0, 1.0).toDouble(), child: child)),
+          offset: Offset(0, -52 * (1 - value)),
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()..setEntry(3, 2, .001)..rotateY(flip),
+            child: Transform.scale(scale: .68 + .32 * value, child: Opacity(opacity: value.clamp(0.0, 1.0).toDouble(), child: child)),
+          ),
         );
       },
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: cards.take(3).map((c) => PlayingCardView(card: c, faceUp: faceUp, compact: true)).toList(),
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: List.generate(min(3, cards.length), (i) {
+          final dx = (i - 1) * (compact ? 42.0 : 57.0);
+          final angle = (i - 1) * .10;
+          return Transform.translate(
+            offset: Offset(dx, i == 1 ? -4 : 0),
+            child: Transform.rotate(
+              angle: angle,
+              child: PlayingCardView(card: cards[i], faceUp: faceUp, compact: compact),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class TableMessageBanner extends StatelessWidget {
+  final String message;
+  final int actionSeq;
+  final Color accent;
+  const TableMessageBanner({super.key, required this.message, required this.actionSeq, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      child: Container(
+        key: ValueKey('$actionSeq-$message'),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0x98030A07),
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: accent.withValues(alpha: .20)),
+        ),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 9.3, color: Color(0xFFFFE9B2), fontWeight: FontWeight.w900, shadows: [Shadow(color: Colors.black, blurRadius: 5)]),
+        ),
       ),
     );
   }
@@ -2379,7 +3161,8 @@ class GameActionDock extends StatelessWidget {
   final int activeCount;
   final bool canSideShow;
   final bool busy;
-  final VoidCallback onBlind;
+  final int betAmount;
+  final VoidCallback onBet;
   final VoidCallback onSee;
   final VoidCallback onPack;
   final VoidCallback onShow;
@@ -2392,7 +3175,8 @@ class GameActionDock extends StatelessWidget {
     required this.activeCount,
     required this.canSideShow,
     required this.busy,
-    required this.onBlind,
+    required this.betAmount,
+    required this.onBet,
     required this.onSee,
     required this.onPack,
     required this.onShow,
@@ -2402,61 +3186,190 @@ class GameActionDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 6),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
-        gradient: const LinearGradient(colors: [Color(0xF20A120E), Color(0xF2030806)]),
-        border: Border.all(color: const Color(0xFF8B6417)),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 16, offset: Offset(0, 6))],
+        borderRadius: BorderRadius.circular(27),
+        gradient: const LinearGradient(colors: [Color(0xF50E1812), Color(0xF5040806)]),
+        border: Border.all(color: const Color(0xFFA77A25), width: 1.2),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, 7))],
       ),
       child: Row(
         children: [
-          Expanded(child: _ActionButton(label: 'BLIND', icon: Icons.visibility_off_rounded, color: const Color(0xFF16863B), enabled: enabled, onTap: onBlind)),
+          Expanded(
+            flex: 10,
+            child: _GameActionButton(
+              label: seen ? 'SEEN' : 'SEE CARDS',
+              subtitle: seen ? 'YOUR STATUS IS SEEN' : 'OPEN YOUR HAND',
+              icon: seen ? Icons.visibility_rounded : Icons.style_rounded,
+              color: const Color(0xFF1E6EA6),
+              enabled: enabled && !seen,
+              onTap: onSee,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            flex: 9,
+            child: _GameActionButton(
+              label: 'PACK',
+              subtitle: 'LEAVE THIS HAND',
+              icon: Icons.close_rounded,
+              color: const Color(0xFF8E2E2C),
+              enabled: enabled,
+              onTap: onPack,
+            ),
+          ),
           const SizedBox(width: 7),
-          Expanded(child: _ActionButton(label: seen ? 'CARD SEEN' : 'SEEN CARD', icon: Icons.style_rounded, color: const Color(0xFF1866A7), enabled: enabled && !seen, onTap: onSee)),
+          Expanded(
+            flex: 15,
+            child: _PrimaryBetButton(
+              seen: seen,
+              amount: betAmount,
+              enabled: enabled,
+              busy: busy,
+              onTap: onBet,
+            ),
+          ),
           const SizedBox(width: 7),
-          Expanded(child: _ActionButton(label: 'PACK', icon: Icons.close_rounded, color: const Color(0xFF882B29), enabled: enabled, onTap: onPack)),
-          const SizedBox(width: 7),
-          Expanded(child: _ActionButton(label: 'SHOW', icon: Icons.emoji_events_rounded, color: const Color(0xFFA8750D), enabled: enabled && activeCount >= 2, onTap: onShow)),
-          const SizedBox(width: 7),
-          Expanded(child: _ActionButton(label: 'SIDE SHOW', icon: Icons.compare_arrows_rounded, color: const Color(0xFF67328E), enabled: enabled && seen && activeCount >= 3 && canSideShow, onTap: onSideShow)),
+          Expanded(
+            flex: 9,
+            child: _GameActionButton(
+              label: 'SHOW',
+              subtitle: 'COMPARE HANDS',
+              icon: Icons.emoji_events_rounded,
+              color: const Color(0xFFA8750D),
+              enabled: enabled && activeCount >= 2,
+              onTap: onShow,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            flex: 10,
+            child: _GameActionButton(
+              label: 'SIDE SHOW',
+              subtitle: 'SEEN VS SEEN',
+              icon: Icons.compare_arrows_rounded,
+              color: const Color(0xFF66358C),
+              enabled: enabled && seen && activeCount >= 3 && canSideShow,
+              onTap: onSideShow,
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _ActionButton extends StatelessWidget {
+class _PrimaryBetButton extends StatelessWidget {
+  final bool seen;
+  final int amount;
+  final bool enabled;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _PrimaryBetButton({required this.seen, required this.amount, required this.enabled, required this.busy, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = seen ? const Color(0xFFB47A0F) : const Color(0xFF16863B);
+    return AnimatedScale(
+      scale: enabled ? 1 : .98,
+      duration: const Duration(milliseconds: 180),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [color.withValues(alpha: 1), color.withValues(alpha: .62)]),
+            border: Border.all(color: enabled ? const Color(0xFFFFE59D) : Colors.white24, width: enabled ? 1.5 : 1),
+            boxShadow: enabled ? [BoxShadow(color: color.withValues(alpha: .32), blurRadius: 12, spreadRadius: 1)] : null,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: const [
+                    CasinoChip(color: Color(0xFFE84B3C), size: 26),
+                    Positioned(left: 8, top: 3, child: CasinoChip(color: Color(0xFFE4B530), size: 22)),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        busy ? 'WAIT...' : (seen ? 'CHAAL' : 'BLIND'),
+                        maxLines: 1,
+                        style: const TextStyle(fontSize: 13, height: 1, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: .8),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '$amount CHIPS  •  ${seen ? '2X AUTO' : '1X'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 7.5, height: 1, color: const Color(0xCCFFFFFF), fontWeight: FontWeight.w900, letterSpacing: .35),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GameActionButton extends StatelessWidget {
   final String label;
+  final String subtitle;
   final IconData icon;
   final Color color;
   final bool enabled;
   final VoidCallback onTap;
 
-  const _ActionButton({required this.label, required this.icon, required this.color, required this.enabled, required this.onTap});
+  const _GameActionButton({required this.label, required this.subtitle, required this.icon, required this.color, required this.enabled, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 150),
-      opacity: enabled ? 1 : .38,
+      opacity: enabled ? 1 : .30,
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(19),
         child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(colors: [color.withValues(alpha: .95), color.withValues(alpha: .55)]),
+            borderRadius: BorderRadius.circular(19),
+            gradient: LinearGradient(colors: [color.withValues(alpha: .96), color.withValues(alpha: .55)]),
             border: Border.all(color: Colors.white24),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 17, color: Colors.white),
-              const SizedBox(width: 5),
-              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: .45))),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 16, color: Colors.white),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.8, height: 1, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: .35)),
+                      const SizedBox(height: 3),
+                      Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 6.4, height: 1, color: Colors.white70, fontWeight: FontWeight.w800, letterSpacing: .2)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

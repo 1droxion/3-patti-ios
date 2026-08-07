@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomInt } from 'node:crypto';
 
 export const rooms = new Map();
 const queues = new Map();
@@ -55,7 +55,7 @@ function makeDeck() {
     for (let rank = 2; rank <= 14; rank++) cards.push({ rank, suit });
   }
   for (let i = cards.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomInt(i + 1);
     [cards[i], cards[j]] = [cards[j], cards[i]];
   }
   return cards;
@@ -140,6 +140,8 @@ function startRound(room) {
   room.lastAction = 'deal';
   room.lastActorId = null;
   room.lastTimeoutPlayerId = null;
+  room.lastBetAmount = 0;
+  room.actionSeq = (room.actionSeq || 0) + 1;
 
   for (const p of room.players) {
     p.folded = false;
@@ -150,7 +152,7 @@ function startRound(room) {
     room.pot += boot;
   }
 
-  room.turnIndex = Math.floor(Math.random() * Math.max(1, room.players.length));
+  room.turnIndex = room.players.length ? randomInt(room.players.length) : 0;
   setTurn(room, room.turnIndex);
 }
 
@@ -193,6 +195,8 @@ function tickRoom(room) {
     return;
   }
   room.lastTimeoutPlayerId = current.id;
+  room.lastBetAmount = 0;
+  room.actionSeq = (room.actionSeq || 0) + 1;
   room.lastAction = 'timeout';
   room.lastActorId = current.id;
   room.message = `${current.name} timed out. Turn skipped.`;
@@ -235,9 +239,14 @@ function publicState(room, playerId) {
     currentPlayerId: current?.id || null,
     turnExpiresAt: room.turnExpiresAt || 0,
     turnDurationMs: TURN_MS,
+    serverNow: Date.now(),
+    blindAmount: room.currentBet,
+    chaalAmount: Math.min(room.currentBet * 2, Math.max(0, room.cap - room.pot)),
     lastAction: room.lastAction || null,
     lastActorId: room.lastActorId || null,
     lastTimeoutPlayerId: room.lastTimeoutPlayerId || null,
+    lastBetAmount: room.lastBetAmount || 0,
+    actionSeq: room.actionSeq || 0,
     canSideShow: Boolean(sideShowTarget),
     sideShowTargetId: sideShowTarget?.id || null,
     myId: playerId,
@@ -291,6 +300,8 @@ function joinRoom({ playerId, name, playerCount }) {
       lastAction: null,
       lastActorId: null,
       lastTimeoutPlayerId: null,
+      lastBetAmount: 0,
+      actionSeq: 0,
     };
     rooms.set(room.id, room);
     q.push(room.id);
@@ -322,7 +333,7 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.8.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.0.0' });
   }
 
   if (req.method === 'POST' && route === 'join') {
@@ -374,30 +385,49 @@ export async function handle(req, res, forcedRoute = '') {
 
       room.lastActorId = player.id;
       room.lastTimeoutPlayerId = null;
+      room.lastBetAmount = 0;
 
       if (action === 'see') {
         if (player.seen) return json(res, 409, { error: 'Cards already seen' });
         player.seen = true;
+        room.actionSeq = (room.actionSeq || 0) + 1;
         room.lastAction = 'see';
-        room.message = `${player.name} saw their cards. Choose your move before time runs out.`;
-        // Seeing cards does not consume the turn; the same 60-second turn continues.
+        room.message = `${player.name} is now SEEN. Their cards are open only to them.`;
+        // Seeing cards does not consume the turn. The active player's server timer keeps running.
       } else if (action === 'blind') {
+        if (player.seen) return json(res, 409, { error: 'You are Seen. Use Chaal.' });
         if (room.pot >= room.cap) return json(res, 409, { error: 'Table limit reached. Use Show.' });
         const amount = Math.min(room.currentBet, room.cap - room.pot, player.chips);
         if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
         player.chips -= amount;
         room.pot += amount;
+        room.lastBetAmount = amount;
+        room.actionSeq = (room.actionSeq || 0) + 1;
         room.lastAction = 'blind';
-        room.message = `${player.name} puts ${amount} chips blind.`;
-        room.currentBet = Math.min(room.currentBet * 2, Math.max(10, room.cap - room.pot || room.currentBet));
+        room.message = `${player.name} plays BLIND for ${amount} chips.`;
+        // Blind keeps the same base stake. Seen players automatically pay double with Chaal.
+        advanceTurn(room);
+      } else if (action === 'chaal') {
+        if (!player.seen) return json(res, 409, { error: 'See your cards before Chaal' });
+        if (room.pot >= room.cap) return json(res, 409, { error: 'Table limit reached. Use Show.' });
+        const amount = Math.min(room.currentBet * 2, room.cap - room.pot, player.chips);
+        if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
+        player.chips -= amount;
+        room.pot += amount;
+        room.lastBetAmount = amount;
+        room.actionSeq = (room.actionSeq || 0) + 1;
+        room.lastAction = 'chaal';
+        room.message = `${player.name} plays CHAAL for ${amount} chips.`;
         advanceTurn(room);
       } else if (action === 'pack') {
         player.folded = true;
+        room.actionSeq = (room.actionSeq || 0) + 1;
         room.lastAction = 'pack';
         room.message = `${player.name} packed.`;
         maybeSettleLastStanding(room);
         if (room.status === 'playing') advanceTurn(room);
       } else if (action === 'show') {
+        room.actionSeq = (room.actionSeq || 0) + 1;
         room.lastAction = 'show';
         room.message = `${player.name} called Show.`;
         settle(room);
@@ -408,6 +438,7 @@ export async function handle(req, res, forcedRoute = '') {
         const comparison = compareHands(player.cards, target.cards);
         const loser = comparison > 0 ? target : player; // requester loses ties
         loser.folded = true;
+        room.actionSeq = (room.actionSeq || 0) + 1;
         room.lastAction = 'sideshow';
         room.message = `${player.name} Side Show vs ${target.name}. ${loser.name} packs.`;
         maybeSettleLastStanding(room);

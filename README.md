@@ -1,44 +1,36 @@
+# 3 Patti Social V1.0 — Real Game Table Redesign
 
-# 3 Patti Social V0.8 — Real Table Game Feel
+Drop this ZIP into the root of the existing `3-patti-ios` repo. It intentionally does not overwrite `ios/`, so the existing Apple bundle ID/signing configuration stays in place.
 
-Drop this ZIP into the root of the existing `3-patti-ios` repo. It does not include or overwrite `ios/`, so the current Apple bundle ID and signing setup stay intact.
+## Visible table changes
+- Full-screen game-room layout: no normal AppBar on the table
+- Larger premium oval Teen Patti felt table with wood/gold rail
+- Dealer host sits behind the top edge with a visible deck/hand
+- Cards animate dealer → every player
+- Player seats are arranged around the table with avatar, name, chips, and BLIND / SEEN / PACKED status
+- 60-second countdown is a separate badge beside the ACTIVE PLAYER profile — never on the dealer
+- Active player gets glow + TURN badge; local player also gets YOUR TURN feedback
+- Incoming notification/control overlays do not stop the server-based timer; returning from background forces immediate resync
+- No rupee sign on gameplay table; balances are CHIPS
+- More colorful poker chips in the center pot
+- Betting chips visibly fly player → pot
+- Your three cards sit on the felt and flip open after See Cards
+- Other users see your status as SEEN, but not your private cards
+- Main action automatically changes BLIND → CHAAL after seeing cards
+- BLIND uses 1x current amount; CHAAL uses 2x automatically
+- Bottom controls are redesigned as game controls: SEE CARDS / PACK / BLIND-or-CHAAL / SHOW / SIDE SHOW
+- Card, chip and winner audio hooks remain enabled
+- Version `1.0.0+11`
 
-## V0.8 table upgrades
-- Oval / round green Teen Patti felt table
-- Lady dealer at the top-center of the table
-- Dealer-to-player card deal animation
-- Player profile seats arranged around the table
-- Each seat shows name, chips and Blind / Seen / Packed state
-- 60-second turn countdown ring on the active player
-- Timeout is enforced by the backend; expired turns are skipped automatically
-- Center pot uses chip-style graphics
-- Winner overlay and chip payout animation feel
-- Card sound, chip sound and win jingle assets included
-- Settings includes Card & chip sounds + Win music toggles
-
-## Exactly five in-round actions
-1. BLIND
-2. SEEN CARD
-3. PACK
-4. SHOW
-5. SIDE SHOW
-
-No Chaal / Call / Raise buttons are shown in this build.
-
-## Table limits
-- 2–5 players: 5K
-- 6–8 players: 20K
-- 9–10 players: 50K
-
-## Install patch
+## Install in Codespaces
 ```bash
 cd /workspaces/3-patti-ios
-unzip -o three_patti_v08_real_table.zip
-rm three_patti_v08_real_table.zip
+unzip -o three_patti_v10_real_game_table.zip
+rm three_patti_v10_real_game_table.zip
 flutter pub get
 git add .
-git commit -m "Real Teen Patti table v0.8"
+git commit -m "Full Teen Patti table redesign v1.0"
 git push
 ```
 
-Then rebuild the main branch in Codemagic for TestFlight. Version: `0.8.0+9`.
+After Vercel redeploys, `/health` should report `1.0.0`. Then build TestFlight Build 11.

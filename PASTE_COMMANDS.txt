@@ -1,0 +1,7 @@
+cd /workspaces/3-patti-ios
+unzip -o three_patti_design_v03.zip
+rm three_patti_design_v03.zip
+flutter pub get
+git add .
+git commit -m "Redesign 3 Patti lobby v0.3"
+git push

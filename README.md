@@ -1,91 +1,75 @@
-# 3 Patti Social USA — V0.2
+# 3 Patti Social v0.3 — Lobby Redesign Patch
 
-A USA-first, globally usable **social Teen Patti** prototype. This version is intentionally **virtual chips only**: no deposits, no cash wagering, no withdrawals, and no commission on real money.
+This ZIP is designed to be extracted **into the root of your existing `3-patti-ios` GitHub repo**.
+It intentionally does **not** include or overwrite your existing `ios/` folder, so your Apple bundle ID, signing setup, and TestFlight configuration stay intact.
 
-## What changed from V0.1
-- Real server-backed matchmaking for **2 through 10 players**
-- Multiple phones can join the same waiting room
-- Server controls the deck, private cards, pot, chip balances, and hand winner
-- 10-chip boot and 5,000-chip table cap
-- Pack / See / Chaal / Show / Play Again
-- Device-local store-price example (`$1.99` in the US, `₹99` in India) for non-wagering VIP/cosmetics only
-- Stronger USA-first branding while remaining understandable to Indian players worldwide
+## What this version changes
 
-## 1. Start the multiplayer server
-Node.js 18+ is enough. There are no npm dependencies.
+- Landscape-first / horizontal UI
+- New dark green + gold casino-style lobby
+- Table colors:
+  - 2–5 players = GREEN
+  - 6–8 players = BLUE
+  - 9–10 players = GOLD
+- No display name on the lobby; edit it in Profile
+- Bottom navigation only: Store / History / Profile
+- Tap the 3 Patti logo/title to return Home
+- 3-line menu contains Wallet / Withdraw / Settings / Support / Rules & fees
+- Delete Account is inside Settings and asks "Are you sure?" before clearing local prototype data
+- Default live API URL: `https://3-patti-ios.vercel.app`
+- Multiplayer flow retained: matchmaking, server-side deck, See / Pack / Chaal / Show / Play Again
+- Prototype server applies a 5% table fee to a settled pot and returns the remaining chip payout to the winner
+- Fee is not cluttering the lobby; it is disclosed in Rules & fees and in the result breakdown
+- Version bumped to `0.3.0+3` for the next TestFlight build
+
+## Important prototype limitation
+
+The UI shows the planned `1 chip = ₹1` wallet model, but real deposits, KYC, bank payouts, and withdrawals are **not connected in this build**. Wallet and Withdraw screens clearly remain disabled until a properly licensed payment stack is connected for a permitted market.
+
+Also, the current Vercel multiplayer backend keeps room state in memory. That is okay for an engineering prototype, but it is not production-safe because serverless instances can restart or split traffic. Before public scale, move live room state to a persistent realtime store or a dedicated multiplayer service.
+
+## Paste this ZIP into Codespaces
+
+Upload `three_patti_design_v03.zip` to the root of your repo, then run:
 
 ```bash
-cd backend
-npm start
-```
-
-The server listens on port `8080`.
-
-Health check:
-
-```bash
-curl http://localhost:8080/health
-```
-
-## 2. Generate Flutter platform folders
-Flutter is not installed in the build environment that created this source archive, so run these locally:
-
-```bash
-flutter create . --platforms=android,ios
+cd /workspaces/3-patti-ios
+unzip -o three_patti_design_v03.zip
+rm three_patti_design_v03.zip
 flutter pub get
+git add .
+git commit -m "Redesign 3 Patti lobby v0.3"
+git push
 ```
 
-## 3. Run the app
-### Android emulator + server on same computer
-The default API address is already:
+Vercel should redeploy the backend automatically because `backend/` changed.
+
+## Test backend
+
+After Vercel finishes:
 
 ```text
-http://10.0.2.2:8080
+https://3-patti-ios.vercel.app/health
 ```
 
-Then run:
+Expected:
 
-```bash
-flutter run
+```json
+{"ok":true,"rooms":0,"version":"0.3.0"}
 ```
 
-### Two real phones on the same Wi-Fi
-Find your computer's LAN IP, for example `192.168.1.50`, then run each app with:
+## Build iOS
 
-```bash
-flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8080
-```
+In Codemagic, build the `main` branch again with your existing App Store signing and App Store Connect publishing settings. Since the Flutter version is now `0.3.0+3`, it should appear in TestFlight as the next build.
 
-Your firewall must allow TCP port 8080.
+## Files in this ZIP
 
-### iOS simulator
-Use your Mac server address, for example:
+- `lib/main.dart` — redesigned Flutter app + game table UI
+- `backend/game.js` — shared game engine / matchmaking / 5% prototype table fee
+- `backend/server.js` — local Node server
+- `backend/api/index.js` — Vercel serverless entrypoint
+- `backend/vercel.json` — Vercel rewrites
+- `backend/package.json` — Node metadata
+- `pubspec.yaml` — Flutter version `0.3.0+3`
+- `design/lobby_reference.png` — the approved visual reference
 
-```bash
-flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8080
-```
-
-For iOS production, use HTTPS rather than plain HTTP.
-
-## Prototype limitations
-This is a multiplayer engineering prototype, not yet a production App Store build. Before public release we still need:
-- Account/authentication system
-- Persistent database
-- Reconnect/session recovery
-- Turn timers and full Teen Patti betting rules
-- Abuse and anti-collusion systems
-- Rate limiting and production security
-- Push notifications
-- Analytics/crash reporting
-- Store assets/privacy policy/terms
-- Production backend hosting with HTTPS
-- App Store / Google Play compliance review
-
-## Important product rule
-Keep playable chips non-purchasable and non-withdrawable in the social version. Monetization can be ads, VIP access, cosmetics, avatars, table themes, or other non-wagering features.
-
-## Development-network note
-Android 9+ may block local plain-HTTP traffic by default. For local testing only, either use an HTTPS tunnel/server or enable cleartext traffic in the generated Android manifest. Production builds should use HTTPS and should not rely on cleartext HTTP.
-
-## Server privacy detail
-When a player is still playing blind, the server sends card backs rather than the private card values. The real card values are returned only after that player chooses **SEE** or after showdown.

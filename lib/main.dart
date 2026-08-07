@@ -439,10 +439,56 @@ class _CardLogo extends StatelessWidget {
 
 
 
-class LobbyView extends StatelessWidget {
+class LobbyView extends StatefulWidget {
   final AppSession session;
 
   const LobbyView({super.key, required this.session});
+
+  @override
+  State<LobbyView> createState() => _LobbyViewState();
+}
+
+class _LobbyViewState extends State<LobbyView> {
+  Timer? livePoller;
+  final Map<int, Map<String, dynamic>> liveStats = {};
+  bool liveConnected = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pollLiveTables();
+    livePoller = Timer.periodic(const Duration(milliseconds: 1500), (_) => _pollLiveTables());
+  }
+
+  @override
+  void dispose() {
+    livePoller?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _pollLiveTables() async {
+    try {
+      final data = await Api.get('/lobby');
+      final rows = data['tables'];
+      if (!mounted || rows is! List) return;
+      final next = <int, Map<String, dynamic>>{};
+      for (final raw in rows) {
+        if (raw is Map) {
+          final row = Map<String, dynamic>.from(raw);
+          final players = row['players'];
+          if (players is int) next[players] = row;
+        }
+      }
+      setState(() {
+        liveStats
+          ..clear()
+          ..addAll(next);
+        liveConnected = true;
+      });
+    } catch (_) {
+      if (mounted && liveConnected) setState(() => liveConnected = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -450,68 +496,96 @@ class LobbyView extends StatelessWidget {
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 340;
         final pad = compact ? 7.0 : 11.0;
-        final heroHeight = compact ? 68.0 : 84.0;
-        final roomWidth = compact ? 170.0 : 205.0;
+        final roomWidth = compact ? 184.0 : 224.0;
 
         return Padding(
-          padding: EdgeInsets.all(pad),
+          padding: EdgeInsets.fromLTRB(pad, compact ? 5 : 8, pad, pad),
           child: Column(
             children: [
-              SizedBox(height: heroHeight, child: const PremiumHeroBanner()),
-              SizedBox(height: compact ? 7 : 10),
               Row(
                 children: [
-                  const Icon(Icons.swipe_rounded, color: gold, size: 20),
-                  const SizedBox(width: 7),
+                  _LivePulseDot(connected: liveConnected),
+                  const SizedBox(width: 8),
                   const Text(
-                    'SWIPE TO CHOOSE A TABLE',
-                    style: TextStyle(color: Color(0xFFFFE4A0), fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: .8),
+                    'LIVE TABLES',
+                    style: TextStyle(color: Color(0xFFFFE4A0), fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: 1.15),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    liveConnected ? 'ONLINE • SWIPE LEFT / RIGHT' : 'CONNECTING TO LIVE ROOMS...',
+                    style: TextStyle(
+                      color: liveConnected ? Colors.white54 : Colors.orangeAccent,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .45,
+                    ),
                   ),
                   const Spacer(),
-                  _TierLegend(color: Color(0xFF76F06A), text: '5K'),
-                  const SizedBox(width: 8),
-                  _TierLegend(color: Color(0xFF62B9FF), text: '20K'),
-                  const SizedBox(width: 8),
-                  _TierLegend(color: Color(0xFFFFD45A), text: '50K'),
+                  const _TierLegend(color: Color(0xFF76F06A), text: '5K'),
+                  const SizedBox(width: 7),
+                  const _TierLegend(color: Color(0xFF62B9FF), text: '20K'),
+                  const SizedBox(width: 7),
+                  const _TierLegend(color: Color(0xFFFFD45A), text: '50K'),
                 ],
               ),
-              SizedBox(height: compact ? 6 : 9),
+              SizedBox(height: compact ? 5 : 8),
               Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-                        padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 20, vertical: compact ? 4 : 8),
-                        itemCount: 9,
-                        separatorBuilder: (_, __) => SizedBox(width: compact ? 14 : 20),
-                        itemBuilder: (context, index) {
-                          final players = index + 2;
-                          return SizedBox(
-                            width: roomWidth,
-                            child: RoundRoomCard(
-                              players: players,
-                              compact: compact,
-                              onTap: () {
-                                Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => MatchmakingScreen(session: session, playerCount: players),
-                                ));
-                              },
-                            ),
-                          );
-                        },
-                      ),
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: const Color(0xFF6D521C).withValues(alpha: .75)),
+                    gradient: const RadialGradient(
+                      center: Alignment(0, -.15),
+                      radius: 1.25,
+                      colors: [Color(0xFF0D3E29), Color(0xFF061D14), Color(0xFF020706)],
                     ),
-                    const Positioned(left: 0, top: 0, bottom: 0, child: _EdgeFade(left: true)),
-                    const Positioned(right: 0, top: 0, bottom: 0, child: _EdgeFade(left: false)),
-                  ],
+                    boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 18, offset: Offset(0, 8))],
+                  ),
+                  child: Stack(
+                    children: [
+                      const Positioned.fill(child: _LobbyFeltGlow()),
+                      Positioned.fill(
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                          padding: EdgeInsets.symmetric(horizontal: compact ? 18 : 28, vertical: compact ? 7 : 12),
+                          itemCount: 9,
+                          separatorBuilder: (_, __) => SizedBox(width: compact ? 15 : 22),
+                          itemBuilder: (context, index) {
+                            final players = index + 2;
+                            final stat = liveStats[players] ?? const <String, dynamic>{};
+                            return SizedBox(
+                              width: roomWidth,
+                              child: RoundRoomCard(
+                                players: players,
+                                compact: compact,
+                                waitingPlayers: stat['waitingPlayers'] as int? ?? 0,
+                                activeRooms: stat['activeRooms'] as int? ?? 0,
+                                onTap: () {
+                                  Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (_) => MatchmakingScreen(session: widget.session, playerCount: players),
+                                  ));
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const Positioned(left: 0, top: 0, bottom: 0, child: _EdgeFade(left: true)),
+                      const Positioned(right: 0, top: 0, bottom: 0, child: _EdgeFade(left: false)),
+                    ],
+                  ),
                 ),
               ),
-              SizedBox(height: compact ? 2 : 5),
-              const Text(
-                'Swipe left or right • Tap a room to enter matchmaking',
-                style: TextStyle(color: Colors.white38, fontSize: 9.5, fontWeight: FontWeight.w700),
+              SizedBox(height: compact ? 3 : 6),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.swipe_rounded, size: 14, color: gold),
+                  SizedBox(width: 5),
+                  Text('SWIPE ROOMS • TAP A ROUND TABLE TO JOIN', style: TextStyle(color: Colors.white38, fontSize: 9.2, fontWeight: FontWeight.w800, letterSpacing: .35)),
+                ],
               ),
             ],
           ),
@@ -519,6 +593,79 @@ class LobbyView extends StatelessWidget {
       },
     );
   }
+}
+
+class _LivePulseDot extends StatefulWidget {
+  final bool connected;
+  const _LivePulseDot({required this.connected});
+
+  @override
+  State<_LivePulseDot> createState() => _LivePulseDotState();
+}
+
+class _LivePulseDotState extends State<_LivePulseDot> with SingleTickerProviderStateMixin {
+  late final AnimationController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 950))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.connected ? const Color(0xFF53EE72) : Colors.orangeAccent;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => Container(
+        width: 11 + controller.value * 2,
+        height: 11 + controller.value * 2,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          boxShadow: [BoxShadow(color: color.withValues(alpha: .18 + controller.value * .35), blurRadius: 7 + controller.value * 8, spreadRadius: controller.value * 2)],
+        ),
+      ),
+    );
+  }
+}
+
+class _LobbyFeltGlow extends StatelessWidget {
+  const _LobbyFeltGlow();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: CustomPaint(painter: _LobbyFeltPainter()),
+    );
+  }
+}
+
+class _LobbyFeltPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final grid = Paint()
+      ..color = const Color(0xFFFFDB72).withValues(alpha: .022)
+      ..strokeWidth = .7;
+    const step = 32.0;
+    for (double x = -size.height; x < size.width + size.height; x += step) {
+      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), grid);
+    }
+    final glow = Paint()
+      ..shader = const RadialGradient(colors: [Color(0x1F55FF96), Color(0x00000000)]).createShader(
+        Rect.fromCircle(center: Offset(size.width * .5, size.height * .5), radius: size.width * .48),
+      );
+    canvas.drawRect(Offset.zero & size, glow);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _TierLegend extends StatelessWidget {
@@ -754,16 +901,38 @@ class _BigCard extends StatelessWidget {
 class RoundRoomCard extends StatefulWidget {
   final int players;
   final bool compact;
+  final int waitingPlayers;
+  final int activeRooms;
   final VoidCallback onTap;
 
-  const RoundRoomCard({super.key, required this.players, required this.compact, required this.onTap});
+  const RoundRoomCard({
+    super.key,
+    required this.players,
+    required this.compact,
+    required this.waitingPlayers,
+    required this.activeRooms,
+    required this.onTap,
+  });
 
   @override
   State<RoundRoomCard> createState() => _RoundRoomCardState();
 }
 
-class _RoundRoomCardState extends State<RoundRoomCard> {
+class _RoundRoomCardState extends State<RoundRoomCard> with SingleTickerProviderStateMixin {
   bool pressed = false;
+  late final AnimationController wheelController;
+
+  @override
+  void initState() {
+    super.initState();
+    wheelController = AnimationController(vsync: this, duration: Duration(milliseconds: 6800 + widget.players * 170))..repeat();
+  }
+
+  @override
+  void dispose() {
+    wheelController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -772,7 +941,11 @@ class _RoundRoomCardState extends State<RoundRoomCard> {
     final limit = _limitFor(players);
     final title = players == 2 ? '1 VS 1' : '$players';
     final subtitle = players == 2 ? 'DUEL' : 'PLAYERS';
-    final diameter = widget.compact ? 158.0 : 190.0;
+    final diameter = widget.compact ? 170.0 : 204.0;
+    final hasActivity = widget.waitingPlayers > 0 || widget.activeRooms > 0;
+    final liveText = widget.waitingPlayers > 0
+        ? '${widget.waitingPlayers} WAITING'
+        : (widget.activeRooms > 0 ? '${widget.activeRooms} LIVE' : 'OPEN');
 
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: .9, end: 1),
@@ -813,7 +986,33 @@ class _RoundRoomCardState extends State<RoundRoomCard> {
                       ],
                     ),
                   ),
-                  Positioned.fill(child: CustomPaint(painter: _CasinoRingPainter(palette.accent))),
+                  Positioned.fill(
+                    child: RotationTransition(
+                      turns: wheelController,
+                      child: CustomPaint(painter: _CasinoRingPainter(palette.accent)),
+                    ),
+                  ),
+                  Positioned(
+                    right: widget.compact ? 2 : 3,
+                    top: widget.compact ? 10 : 13,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: hasActivity ? const Color(0xE6123A22) : const Color(0xD31B211E),
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(color: hasActivity ? const Color(0xFF59F27D) : Colors.white24),
+                        boxShadow: hasActivity ? const [BoxShadow(color: Color(0x5559F27D), blurRadius: 9)] : null,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: hasActivity ? const Color(0xFF59F27D) : Colors.white38)),
+                          const SizedBox(width: 4),
+                          Text(liveText, style: TextStyle(fontSize: 7.5, color: hasActivity ? const Color(0xFFBFFFCB) : Colors.white54, fontWeight: FontWeight.w900, letterSpacing: .45)),
+                        ],
+                      ),
+                    ),
+                  ),
                   Positioned(top: -10, child: _RoomCards(accent: palette.accent, compact: widget.compact)),
                   Positioned(
                     top: widget.compact ? 44 : 57,
@@ -1074,7 +1273,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.0', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.1', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1338,30 +1537,149 @@ class WalletView extends StatelessWidget {
   }
 }
 
-class WithdrawView extends StatelessWidget {
+class WithdrawView extends StatefulWidget {
   final AppSession session;
   const WithdrawView({super.key, required this.session});
 
   @override
+  State<WithdrawView> createState() => _WithdrawViewState();
+}
+
+class _WithdrawViewState extends State<WithdrawView> {
+  final paypalController = TextEditingController();
+  final chipsController = TextEditingController();
+  bool sending = false;
+  String? requestId;
+  String? message;
+
+  @override
+  void dispose() {
+    paypalController.dispose();
+    chipsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitSandbox() async {
+    final email = paypalController.text.trim();
+    final chips = int.tryParse(chipsController.text.replaceAll(',', '').trim()) ?? 0;
+    if (!email.contains('@') || chips <= 0 || chips > widget.session.walletChips) {
+      setState(() => message = 'Enter a valid PayPal email and a chip amount within your available balance.');
+      return;
+    }
+    setState(() {
+      sending = true;
+      message = null;
+      requestId = null;
+    });
+    try {
+      final result = await Api.post('/withdraw-sandbox', {
+        'playerId': widget.session.playerId,
+        'paypalEmail': email,
+        'chips': chips,
+      });
+      if (!mounted) return;
+      setState(() {
+        requestId = '${result['requestId']}';
+        message = 'Sandbox request created. No real money was sent.';
+      });
+      HapticFeedback.mediumImpact();
+    } catch (e) {
+      if (mounted) setState(() => message = '$e');
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final usdPreview = widget.session.walletChips / 100.0;
     return PageFrame(
       title: 'WITHDRAW',
-      subtitle: 'Withdrawal center',
+      subtitle: 'PayPal payout setup — sandbox only',
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _MetricCard(label: 'AVAILABLE DISPLAY BALANCE', value: '${_money(session.walletChips)} CHIPS', helper: 'Prototype balance only'),
-              const SizedBox(height: 12),
-              const _PrototypeNotice(),
-              const SizedBox(height: 12),
-              const TextField(enabled: false, decoration: InputDecoration(labelText: 'Withdrawal amount', border: OutlineInputBorder())),
-              const SizedBox(height: 10),
-              FilledButton(onPressed: null, child: const Text('WITHDRAW — NOT ENABLED')),
-            ],
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: SingleChildScrollView(
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: _panelDecoration(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0B3A72),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFF5AA7FF)),
+                        ),
+                        child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 30),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('PAYPAL WITHDRAWAL', style: TextStyle(fontSize: 18, color: Color(0xFF8BC4FF), fontWeight: FontWeight.w900, letterSpacing: .7)),
+                            Text('${_money(widget.session.walletChips)} CHIPS AVAILABLE', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                            Text('Sandbox preview only • 100 chips = \$1.00 preview • \$${usdPreview.toStringAsFixed(2)} shown balance', style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: paypalController,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'PayPal email',
+                      hintText: 'name@example.com',
+                      prefixIcon: Icon(Icons.alternate_email_rounded),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: chipsController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'Chips to withdraw',
+                      hintText: '1000',
+                      prefixIcon: Icon(Icons.stars_rounded),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: sending ? null : _submitSandbox,
+                    icon: sending
+                        ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.payments_rounded),
+                    label: Text(sending ? 'CREATING SANDBOX REQUEST...' : 'REQUEST PAYPAL WITHDRAWAL — SANDBOX'),
+                  ),
+                  if (message != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(11),
+                      decoration: BoxDecoration(
+                        color: requestId == null ? const Color(0xFF351C15) : const Color(0xFF0F3020),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: requestId == null ? Colors.orangeAccent : const Color(0xFF59E781)),
+                      ),
+                      child: Text(requestId == null ? message! : '$message\nRequest: $requestId', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  const _PrototypeNotice(),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1455,6 +1773,7 @@ class RulesView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _RuleLine('Current build uses social chips only; cash conversion is disabled.'),
+                _RuleLine('PayPal withdrawal screen is SANDBOX only. It creates a demo request and does not send money.'),
                 _RuleLine('Boot starts at 10 chips.'),
                 _RuleLine('Table limits: 2-5 players = 5K, 6-8 players = 20K, 9-10 players = 50K.'),
                 _RuleLine('Players compete against other players; the server deals the cards.'),
@@ -1717,6 +2036,7 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   bool appActive = true;
   bool reconnecting = false;
   int serverClockOffsetMs = 0;
+  int networkEpoch = 0;
   int? recordedRound;
   int? lastRound;
   int lastPot = 0;
@@ -1784,9 +2104,11 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _poll() async {
+    if (busy) return;
+    final epoch = networkEpoch;
     try {
       final s = await Api.get('/state?roomId=${Uri.encodeComponent(widget.roomId)}&playerId=${Uri.encodeComponent(widget.session.playerId)}');
-      if (!mounted) return;
+      if (!mounted || busy || epoch != networkEpoch) return;
       final localNow = DateTime.now().millisecondsSinceEpoch;
       final serverNow = s['serverNow'];
       if (serverNow is int) serverClockOffsetMs = serverNow - localNow;
@@ -1826,32 +2148,108 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     lastTurnPlayerId = turnPlayer;
   }
 
+  void _applyOptimisticBet(String action) {
+    final current = state;
+    if (current == null || (action != 'blind' && action != 'chaal')) return;
+    final playersRaw = current['players'];
+    if (playersRaw is! List) return;
+
+    final players = playersRaw.map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final meIndex = players.indexWhere((p) => p['id'] == widget.session.playerId);
+    if (meIndex < 0) return;
+
+    final me = players[meIndex];
+    final pot = current['pot'] as int? ?? 0;
+    final cap = current['cap'] as int? ?? 0;
+    final blind = current['blindAmount'] as int? ?? 10;
+    final chaal = current['chaalAmount'] as int? ?? blind * 2;
+    final chips = me['chips'] as int? ?? 0;
+    final wanted = action == 'chaal' ? chaal : blind;
+    final amount = max(0, min(wanted, min(chips, max(0, cap - pot)))).toInt();
+    if (amount <= 0) return;
+
+    me['chips'] = chips - amount;
+    final newPot = pot + amount;
+    final currentId = current['currentPlayerId'];
+    final currentIndex = players.indexWhere((p) => p['id'] == currentId);
+    String? nextId;
+    if (currentIndex >= 0) {
+      for (var step = 1; step <= players.length; step++) {
+        final candidate = players[(currentIndex + step) % players.length];
+        if (candidate['folded'] != true) {
+          nextId = candidate['id'] as String?;
+          break;
+        }
+      }
+    }
+
+    final duration = current['turnDurationMs'] as int? ?? 60000;
+    final serverNow = DateTime.now().millisecondsSinceEpoch + serverClockOffsetMs;
+    final next = Map<String, dynamic>.from(current)
+      ..['players'] = players
+      ..['pot'] = newPot
+      ..['lastAction'] = action
+      ..['lastActorId'] = widget.session.playerId
+      ..['lastBetAmount'] = amount
+      ..['actionSeq'] = (current['actionSeq'] as int? ?? 0) + 1
+      ..['message'] = action == 'chaal' ? 'You play CHAAL for $amount chips.' : 'You play BLIND for $amount chips.'
+      ..['currentPlayerId'] = nextId
+      ..['turnExpiresAt'] = nextId == null ? 0 : serverNow + duration
+      ..['serverNow'] = serverNow;
+
+    lastPot = newPot;
+    widget.session.updateWallet(chips - amount);
+    setState(() => state = next);
+  }
+
   Future<void> _action(String action) async {
     if (busy) return;
+    final rollback = state == null ? null : jsonDecode(jsonEncode(state)) as Map<String, dynamic>;
+    final isBet = action == 'blind' || action == 'chaal';
+    networkEpoch += 1;
     HapticFeedback.mediumImpact();
     setState(() => busy = true);
-    if (action == 'see' || action == 'show' || action == 'sideshow') _playSfx('card.wav');
+
+    if (isBet) {
+      _playSfx('chips.wav');
+      _applyOptimisticBet(action);
+    } else if (action == 'see' || action == 'show' || action == 'sideshow') {
+      _playSfx('card.wav');
+    }
+
     try {
-      final s = await Api.post('/action', {
+      final result = await Api.post('/action', {
         'roomId': widget.roomId,
         'playerId': widget.session.playerId,
         'action': action,
       });
       if (!mounted) return;
       final localNow = DateTime.now().millisecondsSinceEpoch;
-      final serverNow = s['serverNow'];
+      final serverNow = result['serverNow'];
       if (serverNow is int) serverClockOffsetMs = serverNow - localNow;
-      _handleGameTransitions(s);
+      _handleGameTransitions(result);
       setState(() {
-        state = s;
+        state = result;
         error = null;
       });
-      _syncWallet(s);
-      _recordIfComplete(s);
+      _syncWallet(result);
+      _recordIfComplete(result);
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (!mounted) return;
+      if (rollback != null) {
+        setState(() {
+          state = rollback;
+          error = '$e';
+        });
+        _syncWallet(rollback);
+      } else {
+        setState(() => error = '$e');
+      }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() => busy = false);
+        Future<void>.delayed(const Duration(milliseconds: 80), _poll);
+      }
     }
   }
 
@@ -1932,7 +2330,8 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     final palette = _paletteFor(requestedPlayers);
     final remainingMs = _remainingMs(s);
     final seconds = (remainingMs / 1000).ceil().clamp(0, 60).toInt();
-    final fraction = (remainingMs / 60000).clamp(0.0, 1.0).toDouble();
+    final turnDurationMs = s['turnDurationMs'] as int? ?? 60000;
+    final fraction = (remainingMs / max(1, turnDurationMs)).clamp(0.0, 1.0).toDouble();
     final activeCount = players.where((p) => p['folded'] != true).length;
     final canSideShow = s['canSideShow'] == true;
     final blindAmount = s['blindAmount'] as int? ?? 10;
@@ -3464,38 +3863,35 @@ String _shortLimit(int value) {
 }
 
 class Api {
+  static final HttpClient _client = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 6)
+    ..idleTimeout = const Duration(seconds: 30)
+    ..maxConnectionsPerHost = 8;
+
   static Future<Map<String, dynamic>> get(String path) async {
-    final client = HttpClient();
-    try {
-      final req = await client.getUrl(Uri.parse('$apiBaseUrl$path'));
-      final res = await req.close();
-      final body = await utf8.decoder.bind(res).join();
-      final data = jsonDecode(body) as Map<String, dynamic>;
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw Exception(data['error'] ?? 'HTTP ${res.statusCode}');
-      }
-      return data;
-    } finally {
-      client.close(force: true);
+    final req = await _client.getUrl(Uri.parse('$apiBaseUrl$path'));
+    req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    final res = await req.close();
+    final body = await utf8.decoder.bind(res).join();
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(data['error'] ?? 'HTTP ${res.statusCode}');
     }
+    return data;
   }
 
   static Future<Map<String, dynamic>> post(String path, Map<String, dynamic> payload) async {
-    final client = HttpClient();
-    try {
-      final req = await client.postUrl(Uri.parse('$apiBaseUrl$path'));
-      req.headers.contentType = ContentType.json;
-      req.write(jsonEncode(payload));
-      final res = await req.close();
-      final body = await utf8.decoder.bind(res).join();
-      final data = jsonDecode(body) as Map<String, dynamic>;
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw Exception(data['error'] ?? 'HTTP ${res.statusCode}');
-      }
-      return data;
-    } finally {
-      client.close(force: true);
+    final req = await _client.postUrl(Uri.parse('$apiBaseUrl$path'));
+    req.headers.contentType = ContentType.json;
+    req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    req.write(jsonEncode(payload));
+    final res = await req.close();
+    final body = await utf8.decoder.bind(res).join();
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(data['error'] ?? 'HTTP ${res.statusCode}');
     }
+    return data;
   }
 }
 

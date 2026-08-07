@@ -326,6 +326,19 @@ function joinRoom({ playerId, name, playerCount }) {
   return room;
 }
 
+function lobbyState() {
+  const tables = [];
+  for (let players = 2; players <= 10; players++) {
+    const matching = [...rooms.values()].filter(room => room.playerCount === players);
+    const waitingPlayers = matching
+      .filter(room => room.status === 'waiting')
+      .reduce((sum, room) => sum + room.players.length, 0);
+    const activeRooms = matching.filter(room => room.status === 'playing').length;
+    tables.push({ players, waitingPlayers, activeRooms });
+  }
+  return { tables, serverNow: Date.now() };
+}
+
 export async function handle(req, res, forcedRoute = '') {
   if (req.method === 'OPTIONS') return json(res, 204, {});
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -333,7 +346,34 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.0.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.1.0' });
+  }
+
+  if (req.method === 'GET' && route === 'lobby') {
+    return json(res, 200, lobbyState());
+  }
+
+  if (req.method === 'POST' && route === 'withdraw-sandbox') {
+    try {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const paypalEmail = String(body.paypalEmail || '').trim();
+      const chips = Number(body.chips || 0);
+      if (!playerId) return json(res, 400, { error: 'playerId required' });
+      if (!paypalEmail.includes('@')) return json(res, 400, { error: 'Valid PayPal email required' });
+      if (!Number.isInteger(chips) || chips <= 0) return json(res, 400, { error: 'Valid chip amount required' });
+      return json(res, 200, {
+        ok: true,
+        mode: 'sandbox',
+        provider: 'paypal',
+        status: 'not_sent',
+        requestId: `PP-SANDBOX-${randomUUID()}`,
+        chips,
+        usdPreview: Number((chips / 100).toFixed(2)),
+      });
+    } catch (e) {
+      return json(res, 400, { error: e.message });
+    }
   }
 
   if (req.method === 'POST' && route === 'join') {

@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 
 const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://3-patti-lh6mgsije-droxion-1a8a6bea.vercel.app',
+  defaultValue: 'https://3-patti-ios.vercel.app',
 );
 
 void main() => runApp(const ThreePattiApp());

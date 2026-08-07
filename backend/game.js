@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 export const rooms = new Map();
 const queues = new Map();
 const FEE_RATE = 0.05;
+const TURN_MS = 60_000;
 
 export function json(res, code, data) {
   const body = JSON.stringify(data);
@@ -41,7 +42,6 @@ export function readBody(req) {
     req.on('error', reject);
   });
 }
-
 
 function tableCapFor(playerCount) {
   if (playerCount <= 5) return 5000;
@@ -96,6 +96,37 @@ function compareHands(a, b) {
   return 0;
 }
 
+function activePlayers(room) {
+  return room.players.filter(p => !p.folded);
+}
+
+function setTurn(room, index) {
+  if (room.status !== 'playing') return;
+  const n = room.players.length;
+  if (!n) return;
+  let cursor = ((index % n) + n) % n;
+  for (let attempts = 0; attempts < n; attempts++) {
+    const p = room.players[cursor];
+    if (!p.folded) {
+      room.turnIndex = cursor;
+      room.turnExpiresAt = Date.now() + TURN_MS;
+      room.message = `${p.name}'s turn.`;
+      return;
+    }
+    cursor = (cursor + 1) % n;
+  }
+}
+
+function advanceTurn(room) {
+  if (room.status !== 'playing') return;
+  const active = activePlayers(room);
+  if (active.length <= 1) {
+    maybeSettleLastStanding(room);
+    return;
+  }
+  setTurn(room, (room.turnIndex + 1) % room.players.length);
+}
+
 function startRound(room) {
   const deck = makeDeck();
   room.round += 1;
@@ -103,10 +134,12 @@ function startRound(room) {
   room.currentBet = 10;
   room.status = 'playing';
   room.winnerId = null;
-  room.message = `Round ${room.round} started. Boot: 10 chips.`;
   room.revealed = false;
   room.lastFee = 0;
   room.lastPayout = 0;
+  room.lastAction = 'deal';
+  room.lastActorId = null;
+  room.lastTimeoutPlayerId = null;
 
   for (const p of room.players) {
     p.folded = false;
@@ -116,6 +149,9 @@ function startRound(room) {
     p.chips -= boot;
     room.pot += boot;
   }
+
+  room.turnIndex = Math.floor(Math.random() * Math.max(1, room.players.length));
+  setTurn(room, room.turnIndex);
 }
 
 function payWinner(room, winner, reason = '') {
@@ -127,11 +163,12 @@ function payWinner(room, winner, reason = '') {
   room.winnerId = winner.id;
   room.status = 'showdown';
   room.revealed = true;
+  room.turnExpiresAt = 0;
   room.message = `${winner.name} wins ${payout} chips${reason ? ` ${reason}` : '.'}`;
 }
 
 function settle(room) {
-  const active = room.players.filter(p => !p.folded);
+  const active = activePlayers(room);
   if (!active.length) return;
   let winner = active[0];
   for (const p of active.slice(1)) {
@@ -141,15 +178,45 @@ function settle(room) {
 }
 
 function maybeSettleLastStanding(room) {
-  const active = room.players.filter(p => !p.folded);
+  const active = activePlayers(room);
   if (active.length === 1 && room.status === 'playing') {
     payWinner(room, active[0], 'after everyone else packed.');
   }
 }
 
+function tickRoom(room) {
+  if (!room || room.status !== 'playing') return;
+  if (!room.turnExpiresAt || Date.now() < room.turnExpiresAt) return;
+  const current = room.players[room.turnIndex];
+  if (!current || current.folded) {
+    advanceTurn(room);
+    return;
+  }
+  room.lastTimeoutPlayerId = current.id;
+  room.lastAction = 'timeout';
+  room.lastActorId = current.id;
+  room.message = `${current.name} timed out. Turn skipped.`;
+  advanceTurn(room);
+}
+
+function eligibleSideShowTarget(room, requester) {
+  if (!requester.seen) return null;
+  const n = room.players.length;
+  const requesterIndex = room.players.findIndex(p => p.id === requester.id);
+  for (let step = 1; step < n; step++) {
+    const index = (requesterIndex - step + n) % n;
+    const p = room.players[index];
+    if (!p.folded && p.id !== requester.id && p.seen) return p;
+  }
+  return null;
+}
+
 function publicState(room, playerId) {
+  tickRoom(room);
   const me = room.players.find(p => p.id === playerId);
   if (!me) return null;
+  const current = room.status === 'playing' ? room.players[room.turnIndex] : null;
+  const sideShowTarget = eligibleSideShowTarget(room, me);
 
   return {
     roomId: room.id,
@@ -165,6 +232,14 @@ function publicState(room, playerId) {
     lastPayout: room.lastPayout || 0,
     message: room.message,
     winnerId: room.winnerId,
+    currentPlayerId: current?.id || null,
+    turnExpiresAt: room.turnExpiresAt || 0,
+    turnDurationMs: TURN_MS,
+    lastAction: room.lastAction || null,
+    lastActorId: room.lastActorId || null,
+    lastTimeoutPlayerId: room.lastTimeoutPlayerId || null,
+    canSideShow: Boolean(sideShowTarget),
+    sideShowTargetId: sideShowTarget?.id || null,
     myId: playerId,
     myCards: (me.seen || room.revealed) ? (me.cards || []) : [{}, {}, {}],
     mySeen: me.seen,
@@ -211,6 +286,11 @@ function joinRoom({ playerId, name, playerCount }) {
       revealed: false,
       lastFee: 0,
       lastPayout: 0,
+      turnIndex: 0,
+      turnExpiresAt: 0,
+      lastAction: null,
+      lastActorId: null,
+      lastTimeoutPlayerId: null,
     };
     rooms.set(room.id, room);
     q.push(room.id);
@@ -242,7 +322,7 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.7.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '0.8.0' });
   }
 
   if (req.method === 'POST' && route === 'join') {
@@ -274,37 +354,66 @@ export async function handle(req, res, forcedRoute = '') {
       const action = String(body.action || '');
 
       if (!room) return json(res, 404, { error: 'Room not found' });
+      tickRoom(room);
       const player = room.players.find(p => p.id === playerId);
       if (!player) return json(res, 403, { error: 'Player not in room' });
 
       if (action === 'new') {
         if (room.status !== 'showdown') return json(res, 409, { error: 'Round still active' });
         startRound(room);
-      } else {
-        if (room.status !== 'playing') return json(res, 409, { error: 'Round is not active' });
-        if (player.folded) return json(res, 409, { error: 'Player already packed' });
+        return json(res, 200, publicState(room, playerId));
+      }
 
-        if (action === 'see') {
-          player.seen = true;
-          room.message = `${player.name} saw their cards.`;
-        } else if (action === 'pack') {
-          player.folded = true;
-          room.message = `${player.name} packed.`;
-          maybeSettleLastStanding(room);
-        } else if (action === 'chaal') {
-          if (room.pot >= room.cap) return json(res, 409, { error: 'Table cap reached. Show cards.' });
-          const amount = Math.min(room.currentBet, room.cap - room.pot, player.chips);
-          if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
-          player.chips -= amount;
-          room.pot += amount;
-          room.message = `${player.name} added ${amount} chips.`;
-          room.currentBet = Math.min(room.currentBet * 2, room.cap);
-          if (room.pot >= room.cap) room.message += ' Table cap reached.';
-        } else if (action === 'show') {
-          settle(room);
-        } else {
-          return json(res, 400, { error: 'Unknown action' });
-        }
+      if (room.status !== 'playing') return json(res, 409, { error: 'Round is not active' });
+      if (player.folded) return json(res, 409, { error: 'Player already packed' });
+
+      const current = room.players[room.turnIndex];
+      if (!current || current.id !== playerId) {
+        return json(res, 409, { error: 'Wait for your turn' });
+      }
+
+      room.lastActorId = player.id;
+      room.lastTimeoutPlayerId = null;
+
+      if (action === 'see') {
+        if (player.seen) return json(res, 409, { error: 'Cards already seen' });
+        player.seen = true;
+        room.lastAction = 'see';
+        room.message = `${player.name} saw their cards. Choose your move before time runs out.`;
+        // Seeing cards does not consume the turn; the same 60-second turn continues.
+      } else if (action === 'blind') {
+        if (room.pot >= room.cap) return json(res, 409, { error: 'Table limit reached. Use Show.' });
+        const amount = Math.min(room.currentBet, room.cap - room.pot, player.chips);
+        if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
+        player.chips -= amount;
+        room.pot += amount;
+        room.lastAction = 'blind';
+        room.message = `${player.name} puts ${amount} chips blind.`;
+        room.currentBet = Math.min(room.currentBet * 2, Math.max(10, room.cap - room.pot || room.currentBet));
+        advanceTurn(room);
+      } else if (action === 'pack') {
+        player.folded = true;
+        room.lastAction = 'pack';
+        room.message = `${player.name} packed.`;
+        maybeSettleLastStanding(room);
+        if (room.status === 'playing') advanceTurn(room);
+      } else if (action === 'show') {
+        room.lastAction = 'show';
+        room.message = `${player.name} called Show.`;
+        settle(room);
+      } else if (action === 'sideshow') {
+        if (!player.seen) return json(res, 409, { error: 'See your cards before Side Show' });
+        const target = eligibleSideShowTarget(room, player);
+        if (!target) return json(res, 409, { error: 'No eligible seen player for Side Show' });
+        const comparison = compareHands(player.cards, target.cards);
+        const loser = comparison > 0 ? target : player; // requester loses ties
+        loser.folded = true;
+        room.lastAction = 'sideshow';
+        room.message = `${player.name} Side Show vs ${target.name}. ${loser.name} packs.`;
+        maybeSettleLastStanding(room);
+        if (room.status === 'playing') advanceTurn(room);
+      } else {
+        return json(res, 400, { error: 'Unknown action' });
       }
 
       return json(res, 200, publicState(room, playerId));

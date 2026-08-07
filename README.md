@@ -1,7 +1,15 @@
-# 3 Patti Social v0.3 — Lobby Redesign Patch
+# 3 Patti Social v0.4 — Lobby Redesign Patch
 
 This ZIP is designed to be extracted **into the root of your existing `3-patti-ios` GitHub repo**.
 It intentionally does **not** include or overwrite your existing `ios/` folder, so your Apple bundle ID, signing setup, and TestFlight configuration stay intact.
+
+
+## V0.4 compact navigation fix
+- Lobby redesigned to fit on one landscape iPhone screen: no lobby scrolling required.
+- Header reduced to 56 px and bottom dock to 46 px.
+- 2–10 player tables use a fixed two-row, five-column layout.
+- Explicit HOME button added to the main header, Wallet, Withdraw, Settings, Support, Rules, Matchmaking, and live table screens.
+- Store / History / Profile still remain the only bottom navigation items, per the approved design.
 
 ## What this version changes
 
@@ -38,7 +46,7 @@ unzip -o three_patti_design_v03.zip
 rm three_patti_design_v03.zip
 flutter pub get
 git add .
-git commit -m "Redesign 3 Patti lobby v0.3"
+git commit -m "Redesign 3 Patti lobby v0.4"
 git push
 ```
 
@@ -73,3 +81,9 @@ In Codemagic, build the `main` branch again with your existing App Store signing
 - `pubspec.yaml` — Flutter version `0.3.0+3`
 - `design/lobby_reference.png` — the approved visual reference
 
+
+## Quick test after installing Build 4
+1. Lobby should show all 2-10 player cards without vertical scrolling on a normal landscape iPhone.
+2. Tap Store, History, or Profile, then tap the HOME icon in the top-left header.
+3. Open the 3-line menu, enter Wallet/Withdraw/Settings/Support/Rules, then use HOME in the app bar.
+4. Join a table: Matchmaking and live Table screens also have HOME.

@@ -72,9 +72,16 @@ class _ThreePattiAppState extends State<ThreePattiApp> {
 class AppSession extends ChangeNotifier {
   String displayName = 'Player';
   int walletChips = 10000;
+  int navPage = 0; // 0 lobby, 1 store, 2 history, 3 profile
   final String playerId =
       'p-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(99999)}';
   final List<GameHistoryItem> history = [];
+
+  void setPage(int value) {
+    if (navPage == value) return;
+    navPage = value;
+    notifyListeners();
+  }
 
   void updateName(String value) {
     final cleaned = value.trim();
@@ -100,6 +107,7 @@ class AppSession extends ChangeNotifier {
     displayName = 'Player';
     walletChips = 10000;
     history.clear();
+    navPage = 0;
     notifyListeners();
   }
 }
@@ -133,22 +141,22 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   final scaffoldKey = GlobalKey<ScaffoldState>();
-  int page = 0; // 0 lobby, 1 store, 2 history, 3 profile
 
-  void goHome() => setState(() => page = 0);
+  void goHome() => widget.session.setPage(0);
 
   @override
   Widget build(BuildContext context) {
-    final body = switch (page) {
-      1 => StoreView(session: widget.session),
-      2 => HistoryView(session: widget.session),
-      3 => ProfileView(session: widget.session),
-      _ => LobbyView(session: widget.session),
-    };
-
     return AnimatedBuilder(
       animation: widget.session,
       builder: (context, _) {
+        final page = widget.session.navPage;
+        final body = switch (page) {
+          1 => StoreView(session: widget.session),
+          2 => HistoryView(session: widget.session),
+          3 => ProfileView(session: widget.session),
+          _ => LobbyView(session: widget.session),
+        };
+
         return Scaffold(
           key: scaffoldKey,
           endDrawer: AppMenu(session: widget.session),
@@ -171,9 +179,9 @@ class _AppShellState extends State<AppShell> {
                   Expanded(child: body),
                   BottomDock(
                     active: page,
-                    onStore: () => setState(() => page = 1),
-                    onHistory: () => setState(() => page = 2),
-                    onProfile: () => setState(() => page = 3),
+                    onStore: () => widget.session.setPage(1),
+                    onHistory: () => widget.session.setPage(2),
+                    onProfile: () => widget.session.setPage(3),
                   ),
                 ],
               ),
@@ -200,99 +208,74 @@ class AppHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 78,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: const BoxDecoration(
         color: Color(0xF2020907),
         border: Border(bottom: BorderSide(color: Color(0x557A5A10))),
       ),
       child: Row(
         children: [
-          InkWell(
-            onTap: onHome,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Row(
-                children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const RadialGradient(
-                        colors: [Color(0xFFFFE07A), Color(0xFFB87400), Color(0xFF231600)],
-                      ),
-                      border: Border.all(color: gold, width: 1.5),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text('3', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, color: Colors.black)),
-                  ),
-                  const SizedBox(width: 10),
-                  const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('3 PATTI', style: TextStyle(fontSize: 19, color: gold, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
-                      Text('SOCIAL', style: TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.w800, letterSpacing: 2.1)),
-                    ],
-                  ),
-                ],
+          Tooltip(
+            message: 'Home',
+            child: IconButton(
+              onPressed: onHome,
+              icon: const Icon(Icons.home_rounded, color: gold, size: 25),
+              style: IconButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                backgroundColor: const Color(0xFF0B1712),
+                side: const BorderSide(color: Color(0xFF6D5014)),
               ),
             ),
           ),
-          const Spacer(),
-          const Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('3 PATTI SOCIAL', style: TextStyle(fontSize: 25, color: gold, fontWeight: FontWeight.w900, letterSpacing: .8)),
-              SizedBox(height: 2),
-              Text('REAL PLAY. REAL PEOPLE.', style: TextStyle(fontSize: 10, color: Colors.white60, letterSpacing: 2.3, fontWeight: FontWeight.w700)),
-            ],
+          const SizedBox(width: 7),
+          InkWell(
+            onTap: onHome,
+            borderRadius: BorderRadius.circular(12),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Color(0xFFC38A16),
+                    child: Text('3', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.black)),
+                  ),
+                  SizedBox(width: 7),
+                  Text('3 PATTI SOCIAL', style: TextStyle(fontSize: 17, color: gold, fontWeight: FontWeight.w900, letterSpacing: .4)),
+                ],
+              ),
+            ),
           ),
           const Spacer(),
           InkWell(
             onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => WalletScreen(session: session))),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(14),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(13, 8, 10, 8),
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: const Color(0xFF07150F),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: const Color(0xFF9A6813)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.monetization_on_rounded, color: gold, size: 33),
-                  const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('₹${_money(session.walletChips)}', style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
-                      const Text('1 CHIP = ₹1', style: TextStyle(fontSize: 9, color: Colors.white54, fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                  const SizedBox(width: 10),
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0E4D1E),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: goldDeep),
-                    ),
-                    child: const Icon(Icons.add_rounded, color: gold),
-                  ),
+                  const Icon(Icons.monetization_on_rounded, color: gold, size: 24),
+                  const SizedBox(width: 6),
+                  Text('₹${_money(session.walletChips)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+                  const SizedBox(width: 5),
+                  const Text('• 1 chip = ₹1', style: TextStyle(fontSize: 8.5, color: Colors.white54, fontWeight: FontWeight.w700)),
                 ],
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          IconButton.filledTonal(
+          const SizedBox(width: 8),
+          IconButton(
             onPressed: onMenu,
-            icon: const Icon(Icons.menu_rounded, color: gold, size: 30),
+            icon: const Icon(Icons.menu_rounded, color: gold, size: 27),
             style: IconButton.styleFrom(
-              minimumSize: const Size(52, 52),
+              minimumSize: const Size(40, 40),
               backgroundColor: const Color(0xFF0D130F),
               side: const BorderSide(color: Color(0xFF75500B)),
             ),
@@ -312,46 +295,44 @@ class LobbyView extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 700 ? 5 : 2;
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        const outer = 8.0;
+        const gap = 7.0;
+        final heroHeight = constraints.maxHeight < 245 ? 44.0 : 52.0;
+        final gridHeight = max(120.0, constraints.maxHeight - heroHeight - gap - (outer * 2));
+        final cardHeight = max(58.0, (gridHeight - gap) / 2);
+
+        return Padding(
+          padding: const EdgeInsets.all(outer),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              HeroPanel(),
-              const SizedBox(height: 12),
-              const Row(
-                children: [
-                  Icon(Icons.groups_rounded, color: gold, size: 20),
-                  SizedBox(width: 8),
-                  Text('CHOOSE PLAYERS', style: TextStyle(color: gold, fontWeight: FontWeight.w900, letterSpacing: .8)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: 9,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: columns,
-                  childAspectRatio: columns == 5 ? 1.62 : 1.45,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
+              SizedBox(height: heroHeight, child: const _CompactHeroStrip()),
+              const SizedBox(height: gap),
+              Expanded(
+                child: GridView.builder(
+                  padding: EdgeInsets.zero,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: 9,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    mainAxisExtent: cardHeight,
+                    crossAxisSpacing: gap,
+                    mainAxisSpacing: gap,
+                  ),
+                  itemBuilder: (context, index) {
+                    final players = index + 2;
+                    return TableChoiceCard(
+                      players: players,
+                      onTap: () {
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => MatchmakingScreen(
+                            session: session,
+                            playerCount: players,
+                          ),
+                        ));
+                      },
+                    );
+                  },
                 ),
-                itemBuilder: (context, index) {
-                  final players = index + 2;
-                  return TableChoiceCard(
-                    players: players,
-                    onTap: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => MatchmakingScreen(
-                          session: session,
-                          playerCount: players,
-                        ),
-                      ));
-                    },
-                  );
-                },
               ),
             ],
           ),
@@ -361,124 +342,42 @@ class LobbyView extends StatelessWidget {
   }
 }
 
-class HeroPanel extends StatelessWidget {
-  const HeroPanel({super.key});
+class _CompactHeroStrip extends StatelessWidget {
+  const _CompactHeroStrip();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 140),
-      padding: const EdgeInsets.fromLTRB(22, 16, 22, 16),
+      padding: const EdgeInsets.symmetric(horizontal: 13),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF8C6518)),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF073B27), Color(0xFF06291E), Color(0xFF091812)],
-        ),
-        boxShadow: const [BoxShadow(color: Color(0x3300FF66), blurRadius: 30, spreadRadius: -18)],
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF765813)),
+        gradient: const LinearGradient(colors: [Color(0xFF08351F), Color(0xFF041A12)]),
       ),
       child: Row(
         children: [
-          Expanded(
-            flex: 7,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('CHOOSE YOUR TABLE', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900, letterSpacing: .5)),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 18,
-                  runSpacing: 8,
-                  children: const [
-                    _InfoTag(icon: Icons.monetization_on_rounded, text: 'Boot: 10 Chips'),
-                    _InfoTag(icon: Icons.emoji_events_rounded, text: 'Cap: 5,000 Chips'),
-                    _InfoTag(icon: Icons.verified_user_rounded, text: 'Fair & Secure'),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Pick exactly how many players you want. Larger rooms begin when all seats are filled.',
-                  style: TextStyle(fontSize: 12, color: Colors.white60),
-                ),
-              ],
-            ),
-          ),
-          const Expanded(flex: 3, child: _CardArt()),
+          const Icon(Icons.style_rounded, color: gold, size: 22),
+          const SizedBox(width: 8),
+          const Text('CHOOSE YOUR TABLE', style: TextStyle(fontSize: 17, color: gold, fontWeight: FontWeight.w900)),
+          const Spacer(),
+          _compactInfo(Icons.monetization_on_rounded, 'Boot 10'),
+          const SizedBox(width: 14),
+          _compactInfo(Icons.emoji_events_rounded, 'Cap 5,000'),
+          const SizedBox(width: 14),
+          _compactInfo(Icons.verified_user_rounded, 'Fair & Secure'),
         ],
       ),
     );
   }
-}
 
-class _InfoTag extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const _InfoTag({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _compactInfo(IconData icon, String text) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: gold, size: 21),
-        const SizedBox(width: 6),
-        Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+        Icon(icon, size: 16, color: gold),
+        const SizedBox(width: 4),
+        Text(text, style: const TextStyle(fontSize: 10.5, color: Colors.white70, fontWeight: FontWeight.w800)),
       ],
-    );
-  }
-}
-
-class _CardArt extends StatelessWidget {
-  const _CardArt();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 112,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(right: 54, top: 8, child: Transform.rotate(angle: -.12, child: const _MiniCard('A', '♠', Colors.black))),
-          Positioned(right: 23, top: 4, child: Transform.rotate(angle: .10, child: const _MiniCard('A', '♥', Colors.red))),
-          Positioned(right: 0, top: 14, child: Transform.rotate(angle: .20, child: const _MiniCard('A', '♣', Colors.black))),
-          Positioned(right: 5, bottom: 0, child: Container(
-            width: 62,
-            height: 62,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const RadialGradient(colors: [Color(0xFFFFDD6D), Color(0xFFB16D00), Color(0xFF5A3300)]),
-              border: Border.all(color: const Color(0xFFFFE18B), width: 2),
-              boxShadow: const [BoxShadow(color: Color(0x88E2A326), blurRadius: 16)],
-            ),
-            child: const Icon(Icons.savings_rounded, color: Color(0xFF3D2500), size: 30),
-          )),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniCard extends StatelessWidget {
-  final String rank;
-  final String suit;
-  final Color color;
-
-  const _MiniCard(this.rank, this.suit, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 58,
-      height: 84,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E8),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
-      ),
-      child: Text('$rank\n$suit', style: TextStyle(color: color, fontSize: 19, height: .9, fontWeight: FontWeight.w900)),
     );
   }
 }
@@ -492,74 +391,78 @@ class TableChoiceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = _paletteFor(players);
+    final tier = players <= 5 ? 'GREEN' : (players <= 8 ? 'BLUE' : 'GOLD');
     final fast = players <= 5;
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(17),
+      borderRadius: BorderRadius.circular(13),
       child: Container(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.fromLTRB(7, 6, 7, 6),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(17),
-          border: Border.all(color: palette.accent.withValues(alpha: .85), width: players == 2 ? 2 : 1.2),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: palette.accent.withValues(alpha: .85), width: players == 2 ? 1.8 : 1.0),
           gradient: LinearGradient(colors: [palette.top, palette.bottom], begin: Alignment.topLeft, end: Alignment.bottomRight),
-          boxShadow: [
-            if (players == 2) BoxShadow(color: palette.accent.withValues(alpha: .28), blurRadius: 18),
-          ],
+          boxShadow: [if (players == 2) BoxShadow(color: palette.accent.withValues(alpha: .22), blurRadius: 12)],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final tiny = constraints.maxHeight < 75;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CircleAvatar(
-                  radius: 19,
-                  backgroundColor: palette.accent.withValues(alpha: .13),
-                  child: Icon(Icons.groups_rounded, color: palette.accent, size: 22),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('$players', style: const TextStyle(fontSize: 27, height: 1, fontWeight: FontWeight.w900)),
-                      const SizedBox(width: 5),
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 2),
-                        child: Text('PLAYERS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white70)),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: tiny ? 12 : 14,
+                      backgroundColor: palette.accent.withValues(alpha: .14),
+                      child: Icon(Icons.groups_rounded, color: palette.accent, size: tiny ? 15 : 17),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('$players', style: TextStyle(fontSize: tiny ? 20 : 23, height: 1, fontWeight: FontWeight.w900)),
+                            const SizedBox(width: 4),
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 1),
+                              child: Text('PLAYERS', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: Colors.white70)),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
+                    Text(tier, style: TextStyle(fontSize: 7, color: palette.accent, fontWeight: FontWeight.w900, letterSpacing: .5)),
+                  ],
+                ),
+                const Spacer(),
+                if (!tiny)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      fast ? 'FAST MATCH  •  Boot 10  •  Cap 5,000' : 'Boot 10  •  Cap 5,000',
+                      style: const TextStyle(fontSize: 8.5, color: Colors.white70, fontWeight: FontWeight.w700),
+                    ),
                   ),
+                SizedBox(height: tiny ? 3 : 5),
+                Container(
+                  height: tiny ? 24 : 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(7),
+                    gradient: LinearGradient(colors: [palette.button1, palette.button2]),
+                    border: Border.all(color: palette.accent.withValues(alpha: .35)),
+                  ),
+                  child: const Text('JOIN TABLE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900)),
                 ),
               ],
-            ),
-            const Spacer(),
-            if (fast)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: palette.accent.withValues(alpha: .17), borderRadius: BorderRadius.circular(20)),
-                  child: Text('FAST MATCH', style: TextStyle(fontSize: 8, color: palette.accent, fontWeight: FontWeight.w900)),
-                ),
-              ),
-            const SizedBox(height: 5),
-            const FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text('Boot: 10 Chips   |   Cap: 5,000 Chips', style: TextStyle(fontSize: 9.5, color: Colors.white70)),
-            ),
-            const SizedBox(height: 7),
-            Container(
-              height: 34,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(9),
-                gradient: LinearGradient(colors: [palette.button1, palette.button2]),
-                border: Border.all(color: palette.accent.withValues(alpha: .35)),
-              ),
-              child: const Text('JOIN TABLE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -621,7 +524,7 @@ class BottomDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 62,
+      height: 46,
       decoration: const BoxDecoration(
         color: Color(0xF7040A08),
         border: Border(top: BorderSide(color: Color(0xFF64470E))),
@@ -629,9 +532,9 @@ class BottomDock extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: _DockButton(icon: Icons.shopping_cart_outlined, label: 'STORE', selected: active == 1, onTap: onStore)),
-          const VerticalDivider(width: 1, indent: 12, endIndent: 12, color: Colors.white12),
+          const VerticalDivider(width: 1, indent: 8, endIndent: 8, color: Colors.white12),
           Expanded(child: _DockButton(icon: Icons.history_rounded, label: 'HISTORY', selected: active == 2, onTap: onHistory)),
-          const VerticalDivider(width: 1, indent: 12, endIndent: 12, color: Colors.white12),
+          const VerticalDivider(width: 1, indent: 8, endIndent: 8, color: Colors.white12),
           Expanded(child: _DockButton(icon: Icons.person_rounded, label: 'PROFILE', selected: active == 3, onTap: onProfile)),
         ],
       ),
@@ -654,9 +557,9 @@ class _DockButton extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: selected ? gold : Colors.white54, size: 25),
-          const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: 9, color: selected ? gold : Colors.white54, fontWeight: FontWeight.w800)),
+          Icon(icon, color: selected ? gold : Colors.white54, size: 20),
+          const SizedBox(height: 1),
+          Text(label, style: TextStyle(fontSize: 8.5, color: selected ? gold : Colors.white54, fontWeight: FontWeight.w800)),
         ],
       ),
     );
@@ -690,8 +593,8 @@ class AppMenu extends StatelessWidget {
               _MenuTile(icon: Icons.account_balance_wallet_rounded, label: 'Wallet', onTap: () => _pushFromDrawer(context, WalletScreen(session: session))),
               _MenuTile(icon: Icons.upload_rounded, label: 'Withdraw', onTap: () => _pushFromDrawer(context, WithdrawScreen(session: session))),
               _MenuTile(icon: Icons.settings_rounded, label: 'Settings', onTap: () => _pushFromDrawer(context, SettingsScreen(session: session))),
-              _MenuTile(icon: Icons.support_agent_rounded, label: 'Support', onTap: () => _pushFromDrawer(context, const SupportScreen())),
-              _MenuTile(icon: Icons.gavel_rounded, label: 'Rules & fees', onTap: () => _pushFromDrawer(context, const RulesScreen())),
+              _MenuTile(icon: Icons.support_agent_rounded, label: 'Support', onTap: () => _pushFromDrawer(context, SupportScreen(session: session))),
+              _MenuTile(icon: Icons.gavel_rounded, label: 'Rules & fees', onTap: () => _pushFromDrawer(context, RulesScreen(session: session))),
               const Spacer(),
               const Text('3 Patti Social • v0.3 prototype', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.white38)),
             ],
@@ -899,13 +802,13 @@ class PageFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title, style: const TextStyle(fontSize: 27, color: gold, fontWeight: FontWeight.w900)),
-          Text(subtitle, style: const TextStyle(color: Colors.white54)),
-          const SizedBox(height: 14),
+          Text(title, style: const TextStyle(fontSize: 20, color: gold, fontWeight: FontWeight.w900)),
+          Text(subtitle, style: const TextStyle(fontSize: 10.5, color: Colors.white54)),
+          const SizedBox(height: 8),
           Expanded(child: child),
         ],
       ),
@@ -921,6 +824,7 @@ class WalletScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SimpleScreen(
+      session: session,
       title: 'Wallet',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -944,6 +848,7 @@ class WithdrawScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SimpleScreen(
+      session: session,
       title: 'Withdraw',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -977,6 +882,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return SimpleScreen(
+      session: widget.session,
       title: 'Settings',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1021,13 +927,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class RulesScreen extends StatelessWidget {
-  const RulesScreen({super.key});
+  final AppSession session;
+
+  const RulesScreen({super.key, required this.session});
 
   @override
   Widget build(BuildContext context) {
-    return const SimpleScreen(
+    return SimpleScreen(
+      session: session,
       title: 'Rules & fees',
-      child: Column(
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _RuleLine('1 chip = ₹1 in the planned cash-wallet model.'),
@@ -1064,13 +973,16 @@ class _RuleLine extends StatelessWidget {
 }
 
 class SupportScreen extends StatelessWidget {
-  const SupportScreen({super.key});
+  final AppSession session;
+
+  const SupportScreen({super.key, required this.session});
 
   @override
   Widget build(BuildContext context) {
-    return const SimpleScreen(
+    return SimpleScreen(
+      session: session,
       title: 'Support',
-      child: Column(
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Support center', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
@@ -1083,19 +995,42 @@ class SupportScreen extends StatelessWidget {
 }
 
 class SimpleScreen extends StatelessWidget {
+  final AppSession session;
   final String title;
   final Widget child;
 
-  const SimpleScreen({super.key, required this.title, required this.child});
+  const SimpleScreen({super.key, required this.session, required this.title, required this.child});
+
+  void _home(BuildContext context) {
+    session.setPage(0);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: ink,
-      appBar: AppBar(title: Text(title), backgroundColor: const Color(0xFF05100C), foregroundColor: gold),
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: const Color(0xFF05100C),
+        foregroundColor: gold,
+        leading: IconButton(
+          tooltip: 'Back',
+          onPressed: () => Navigator.maybePop(context),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => _home(context),
+            icon: const Icon(Icons.home_rounded, color: gold, size: 20),
+            label: const Text('HOME', style: TextStyle(color: gold, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.all(18),
           child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 720), child: child),
         ),
       ),
@@ -1221,6 +1156,23 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
     final palette = _paletteFor(widget.playerCount);
     return Scaffold(
       backgroundColor: ink,
+      appBar: AppBar(
+        toolbarHeight: 48,
+        backgroundColor: const Color(0xFF04100B),
+        foregroundColor: gold,
+        title: const Text('MATCHMAKING', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              widget.session.setPage(0);
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            icon: const Icon(Icons.home_rounded, color: gold, size: 19),
+            label: const Text('HOME', style: TextStyle(color: gold, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: Container(
@@ -1371,9 +1323,21 @@ class _TableScreenState extends State<TableScreen> {
     return Scaffold(
       backgroundColor: ink,
       appBar: AppBar(
+        toolbarHeight: 48,
         backgroundColor: const Color(0xFF04100B),
-        title: Text('${s['requestedPlayers']}-PLAYER TABLE', style: TextStyle(color: palette.accent, fontWeight: FontWeight.w900)),
-        actions: [Padding(padding: const EdgeInsets.only(right: 16), child: Center(child: Text('${me['chips']} chips', style: const TextStyle(fontWeight: FontWeight.w800))))],
+        title: Text('${s['requestedPlayers']}-PLAYER TABLE', style: TextStyle(fontSize: 16, color: palette.accent, fontWeight: FontWeight.w900)),
+        actions: [
+          Padding(padding: const EdgeInsets.only(right: 8), child: Center(child: Text('${me['chips']} chips', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)))),
+          TextButton.icon(
+            onPressed: () {
+              widget.session.setPage(0);
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            icon: const Icon(Icons.home_rounded, color: gold, size: 19),
+            label: const Text('HOME', style: TextStyle(color: gold, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(width: 6),
+        ],
       ),
       body: SafeArea(
         child: Padding(

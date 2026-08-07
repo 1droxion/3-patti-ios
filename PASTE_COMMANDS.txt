@@ -1,7 +1,7 @@
 cd /workspaces/3-patti-ios
-unzip -o three_patti_design_v04_compact.zip
-rm three_patti_design_v04_compact.zip
+unzip -o three_patti_v05_premium_home.zip
+rm three_patti_v05_premium_home.zip
 flutter pub get
 git add .
-git commit -m "Compact lobby and add Home navigation v0.4"
+git commit -m "Premium full-screen home v0.5"
 git push

@@ -1,7 +1,7 @@
 cd /workspaces/3-patti-ios
-unzip -o three_patti_v05_premium_home.zip
-rm three_patti_v05_premium_home.zip
+unzip -o three_patti_v051_ios_fix.zip
+rm three_patti_v051_ios_fix.zip
 flutter pub get
 git add .
-git commit -m "Premium full-screen home v0.5"
+git commit -m "Fix iOS compile errors v0.5.1"
 git push

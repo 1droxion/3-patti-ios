@@ -1145,7 +1145,7 @@ class PageFrame extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title, style: const TextStyle(fontSize: 20, color: Color(0xFFFFE2A1), fontWeight: FontWeight.w900, letterSpacing: .8)),
-                  Text(subtitle, style: const TextStyle(fontSize: 9.5, color: Colors.white46)),
+                  Text(subtitle, style: const TextStyle(fontSize: 9.5, color: Color(0x75FFFFFF))),
                 ],
               ),
             ],
@@ -1178,7 +1178,7 @@ class WalletView extends StatelessWidget {
               const SizedBox(height: 12),
               const _PrototypeNotice(),
               const SizedBox(height: 12),
-              const FilledButton.icon(onPressed: null, icon: Icon(Icons.add_card_rounded), label: Text('ADD CASH — NOT ENABLED')),
+              FilledButton.icon(onPressed: null, icon: const Icon(Icons.add_card_rounded), label: const Text('ADD CASH — NOT ENABLED')),
             ],
           ),
         ),
@@ -1209,7 +1209,7 @@ class WithdrawView extends StatelessWidget {
               const SizedBox(height: 12),
               const TextField(enabled: false, decoration: InputDecoration(labelText: 'Withdrawal amount', prefixText: '₹ ', border: OutlineInputBorder())),
               const SizedBox(height: 10),
-              const FilledButton(onPressed: null, child: Text('WITHDRAW — NOT ENABLED')),
+              FilledButton(onPressed: null, child: const Text('WITHDRAW — NOT ENABLED')),
             ],
           ),
         ),
@@ -1286,14 +1286,14 @@ class RulesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const PageFrame(
+    return PageFrame(
       title: 'RULES & FEES',
       subtitle: 'Clear rules before you play',
       child: Center(
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 760),
+          constraints: const BoxConstraints(maxWidth: 760),
           child: SingleChildScrollView(
-            child: Column(
+            child: const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _RuleLine('1 chip = ₹1 in the planned cash-wallet model.'),

@@ -1,33 +1,59 @@
+# 3 Patti Social V1.2 — Player Profiles + Continuous Live Tables
 
-# 3 Patti Social V1.1 — Faster Actions + Live Lobby + PayPal Sandbox
+Drop this ZIP into the root of the existing `3-patti-ios` repository. It intentionally does not overwrite the existing `ios/` signing project.
 
-Drop this ZIP into the root of the existing `3-patti-ios` repo. It intentionally does not overwrite `ios/`.
+## V1.2 changes
 
-## V1.1 changes
-- Blind / Chaal now feel immediate with optimistic local chip + pot animation, then reconcile with the authoritative server response.
-- Reuses one HTTP connection instead of creating a new TLS connection for every poll/action.
-- Prevents stale polling responses from overwriting a just-tapped action.
-- Turn timer uses the server-provided duration for better accuracy.
-- Home hero / “Choose Your Table” box removed.
-- Home is now a full live-table carousel with round rotating room wheels.
-- Round rooms show real prototype waiting/active room state from `/lobby`; no fake player counts.
-- Green 2–5 = 5K, Blue 6–8 = 20K, Gold 9–10 = 50K.
-- PayPal withdrawal screen added in SANDBOX mode only. It creates a demo request but sends no money.
-- Sandbox preview uses 100 chips = $1.00 only as a UI/testing preview. Social chips have no cash value in this build.
-- Version 1.1.0+12.
+- Version `1.2.0+13`
+- 8 selectable round profile avatar images in Profile
+- Player avatar + display name are sent to the multiplayer server
+- Every live-table seat shows the player's round avatar, name, chip balance, and Blind/Seen/Packed status
+- Each player's 3 cards now sit directly beside that player's profile seat
+- Your cards flip face-up beside your own profile after Seen Card
+- Opponent cards stay face-down and reveal after showdown
+- 60-second active-turn badge remains beside the active player profile
+- End-of-round controls: NEW ROUND / SWITCH TABLE / EXIT
+- NEW ROUND requires the current players to opt in; if another player exits, the open seat is returned to matchmaking
+- SWITCH TABLE excludes the table you just left so it really searches for a different room
+- Dynamic matchmaking continues creating additional rooms as demand grows; local backend test created 50 simultaneous 1-vs-1 rooms from 100 joins
+- Dealer Tip sandbox: 10 / 25 / 50 / 100 chips with player-to-dealer chip animation and Thank You bubble
+- Dealer tips are recorded separately from the game pot; no real-money payout/bank settlement is enabled in this build
+- Existing PayPal withdrawal remains sandbox only
 
-## Install
+## Install in Codespaces
+
 ```bash
 cd /workspaces/3-patti-ios
-unzip -o three_patti_v11_live_lobby_fast_actions.zip
-rm three_patti_v11_live_lobby_fast_actions.zip
+unzip -o three_patti_v12_profiles_rounds.zip
+rm three_patti_v12_profiles_rounds.zip
 flutter pub get
 git add .
-git commit -m "V1.1 fast table live lobby PayPal sandbox"
+git commit -m "V1.2 player profiles cards and continuous tables"
 git push
 ```
 
-After Vercel redeploys, `/health` should show version `1.1.0`. Build in Codemagic as Version 1.1.0 / Build 12.
+## Verify after Vercel deploy
 
-## Important
-The current Vercel room store is still in memory and is for prototype testing only. Before real-money launch, move rooms/wallets/transactions to persistent regulated infrastructure. Real PayPal gaming payouts are intentionally not connected in this build.
+Open:
+
+`https://3-patti-ios.vercel.app/health`
+
+Expected backend version: `1.2.0`.
+
+## TestFlight
+
+Codemagic should build:
+
+- Version: `1.2.0`
+- Build: `13`
+
+## Suggested test
+
+1. Choose a profile image and display name in Profile.
+2. Join 1 VS 1 from two devices/test users.
+3. Confirm both round avatars + names show around the table.
+4. Confirm 3 cards are beside each player profile.
+5. Tap Seen Card and confirm only your own cards reveal.
+6. Finish the round and confirm NEW ROUND / SWITCH TABLE / EXIT.
+7. Tap NEW ROUND on one device and EXIT on the other; the remaining user should wait for the next matching player.
+8. Tap TIP DEALER and confirm colorful chips fly to the dealer and the tip does not enter the pot.

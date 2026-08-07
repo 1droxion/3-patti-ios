@@ -146,6 +146,7 @@ function startRound(room) {
   for (const p of room.players) {
     p.folded = false;
     p.seen = false;
+    p.readyNext = false;
     p.cards = [deck.pop(), deck.pop(), deck.pop()];
     const boot = Math.min(10, p.chips);
     p.chips -= boot;
@@ -247,6 +248,10 @@ function publicState(room, playerId) {
     lastTimeoutPlayerId: room.lastTimeoutPlayerId || null,
     lastBetAmount: room.lastBetAmount || 0,
     actionSeq: room.actionSeq || 0,
+    dealerTipTotal: room.dealerTipTotal || 0,
+    lastTipAmount: room.lastTipAmount || 0,
+    lastTipPlayerId: room.lastTipPlayerId || null,
+    nextRoundReadyCount: room.players.filter(p => p.readyNext).length,
     canSideShow: Boolean(sideShowTarget),
     sideShowTargetId: sideShowTarget?.id || null,
     myId: playerId,
@@ -255,9 +260,11 @@ function publicState(room, playerId) {
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
+      avatar: p.avatar || 1,
       chips: p.chips,
       folded: p.folded,
       seen: p.seen,
+      readyNext: Boolean(p.readyNext),
     })),
     revealedHands: room.revealed
       ? room.players.map(p => ({ id: p.id, name: p.name, folded: p.folded, cards: p.cards }))
@@ -270,7 +277,7 @@ function queueFor(n) {
   return queues.get(n);
 }
 
-function joinRoom({ playerId, name, playerCount }) {
+function joinRoom({ playerId, name, avatar, playerCount, excludeRoomId = '' }) {
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 10) {
     throw new Error('playerCount must be 2..10');
   }
@@ -278,7 +285,7 @@ function joinRoom({ playerId, name, playerCount }) {
   const q = queueFor(playerCount);
   let room = q
     .map(id => rooms.get(id))
-    .find(r => r && r.status === 'waiting' && r.players.length < r.playerCount);
+    .find(r => r && r.id !== excludeRoomId && r.status === 'waiting' && r.players.length < r.playerCount);
 
   if (!room) {
     room = {
@@ -302,6 +309,9 @@ function joinRoom({ playerId, name, playerCount }) {
       lastTimeoutPlayerId: null,
       lastBetAmount: 0,
       actionSeq: 0,
+      dealerTipTotal: 0,
+      lastTipAmount: 0,
+      lastTipPlayerId: null,
     };
     rooms.set(room.id, room);
     q.push(room.id);
@@ -311,11 +321,17 @@ function joinRoom({ playerId, name, playerCount }) {
     room.players.push({
       id: playerId,
       name: String(name || 'Player').slice(0, 24),
+      avatar: Math.max(1, Math.min(8, Number(avatar) || 1)),
       chips: 10000,
       folded: false,
       seen: false,
+      readyNext: false,
       cards: [],
     });
+  } else {
+    const existing = room.players.find(p => p.id === playerId);
+    existing.name = String(name || existing.name || 'Player').slice(0, 24);
+    existing.avatar = Math.max(1, Math.min(8, Number(avatar) || existing.avatar || 1));
   }
 
   room.message = `Waiting for players: ${room.players.length}/${room.playerCount}`;
@@ -324,6 +340,69 @@ function joinRoom({ playerId, name, playerCount }) {
     queues.set(playerCount, q.filter(id => id !== room.id));
   }
   return room;
+}
+
+
+function removeFromQueues(roomId) {
+  for (const [count, list] of queues.entries()) {
+    queues.set(count, list.filter(id => id !== roomId));
+  }
+}
+
+function addToQueue(room) {
+  const q = queueFor(room.playerCount);
+  if (!q.includes(room.id)) q.push(room.id);
+}
+
+function leaveRoom(room, playerId) {
+  const index = room.players.findIndex(p => p.id === playerId);
+  if (index < 0) return;
+  const leaving = room.players[index];
+  const wasCurrent = room.status === 'playing' && room.turnIndex === index;
+  room.players.splice(index, 1);
+  room.actionSeq = (room.actionSeq || 0) + 1;
+  room.lastAction = 'leave';
+  room.lastActorId = playerId;
+  room.lastBetAmount = 0;
+
+  if (!room.players.length) {
+    removeFromQueues(room.id);
+    rooms.delete(room.id);
+    return;
+  }
+
+  if (room.status === 'playing') {
+    if (room.turnIndex > index) room.turnIndex -= 1;
+    room.turnIndex = Math.min(room.turnIndex, room.players.length - 1);
+    if (activePlayers(room).length <= 1) {
+      maybeSettleLastStanding(room);
+    } else if (wasCurrent) {
+      setTurn(room, room.turnIndex % room.players.length);
+    }
+    room.message = `${leaving.name} left the table.`;
+    return;
+  }
+
+  // After a completed hand, only reopen matchmaking if the players who remain
+  // have explicitly chosen NEW ROUND. Otherwise keep the result screen in place.
+  if (room.players.every(p => p.readyNext)) {
+    room.status = 'waiting';
+    room.winnerId = null;
+    room.revealed = false;
+    room.pot = 0;
+    room.turnExpiresAt = 0;
+    room.lastPayout = 0;
+    room.lastFee = 0;
+    for (const p of room.players) {
+      p.folded = false;
+      p.seen = false;
+      p.cards = [];
+    }
+    room.message = `Seat open: ${room.players.length}/${room.playerCount}. Waiting for player...`;
+    addToQueue(room);
+  } else {
+    room.message = `${leaving.name} exited. Choose NEW ROUND to wait for a new player, SWITCH TABLE, or EXIT.`;
+  }
 }
 
 function lobbyState() {
@@ -346,7 +425,7 @@ export async function handle(req, res, forcedRoute = '') {
     .replace(/^\/+|\/+$/g, '');
 
   if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.1.0' });
+    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.2.0' });
   }
 
   if (req.method === 'GET' && route === 'lobby') {
@@ -376,12 +455,53 @@ export async function handle(req, res, forcedRoute = '') {
     }
   }
 
+
+  if (req.method === 'POST' && route === 'tip-dealer') {
+    try {
+      const body = await readBody(req);
+      const room = rooms.get(String(body.roomId || ''));
+      const playerId = String(body.playerId || '');
+      const chips = Number(body.chips || 0);
+      if (!room) return json(res, 404, { error: 'Room not found' });
+      const player = room.players.find(p => p.id === playerId);
+      if (!player) return json(res, 403, { error: 'Player not in room' });
+      if (![10, 25, 50, 100].includes(chips)) return json(res, 400, { error: 'Tip must be 10, 25, 50, or 100 chips' });
+      if (player.chips < chips) return json(res, 409, { error: 'Not enough chips' });
+      player.chips -= chips;
+      room.dealerTipTotal = (room.dealerTipTotal || 0) + chips;
+      room.lastTipAmount = chips;
+      room.lastTipPlayerId = player.id;
+      room.actionSeq = (room.actionSeq || 0) + 1;
+      room.lastAction = 'tip';
+      room.lastActorId = player.id;
+      room.lastBetAmount = 0;
+      room.message = `${player.name} tipped the dealer ${chips} chips. Thank you!`;
+      return json(res, 200, publicState(room, playerId));
+    } catch (e) {
+      return json(res, 400, { error: e.message });
+    }
+  }
+
+  if (req.method === 'POST' && route === 'leave') {
+    try {
+      const body = await readBody(req);
+      const room = rooms.get(String(body.roomId || ''));
+      const playerId = String(body.playerId || '');
+      if (!room) return json(res, 200, { ok: true, alreadyGone: true });
+      if (!room.players.some(p => p.id === playerId)) return json(res, 200, { ok: true, alreadyGone: true });
+      leaveRoom(room, playerId);
+      return json(res, 200, { ok: true });
+    } catch (e) {
+      return json(res, 400, { error: e.message });
+    }
+  }
+
   if (req.method === 'POST' && route === 'join') {
     try {
       const body = await readBody(req);
       const playerId = String(body.playerId || '').trim();
       if (!playerId) return json(res, 400, { error: 'playerId required' });
-      const room = joinRoom({ playerId, name: body.name, playerCount: Number(body.playerCount) });
+      const room = joinRoom({ playerId, name: body.name, avatar: body.avatar, playerCount: Number(body.playerCount), excludeRoomId: String(body.excludeRoomId || '') });
       return json(res, 200, publicState(room, playerId));
     } catch (e) {
       return json(res, 400, { error: e.message });
@@ -411,7 +531,30 @@ export async function handle(req, res, forcedRoute = '') {
 
       if (action === 'new') {
         if (room.status !== 'showdown') return json(res, 409, { error: 'Round still active' });
-        startRound(room);
+        player.readyNext = true;
+        const ready = room.players.filter(p => p.readyNext).length;
+        room.actionSeq = (room.actionSeq || 0) + 1;
+        room.lastAction = 'ready-next';
+        room.lastActorId = player.id;
+        room.message = `${ready}/${room.players.length} players ready for the next round.`;
+        if (room.players.length === room.playerCount && ready === room.players.length) {
+          startRound(room);
+        } else if (ready === room.players.length && room.players.length < room.playerCount) {
+          room.status = 'waiting';
+          room.winnerId = null;
+          room.revealed = false;
+          room.pot = 0;
+          room.turnExpiresAt = 0;
+          room.lastPayout = 0;
+          room.lastFee = 0;
+          for (const p of room.players) {
+            p.folded = false;
+            p.seen = false;
+            p.cards = [];
+          }
+          room.message = `Seat open: ${room.players.length}/${room.playerCount}. Waiting for player...`;
+          addToQueue(room);
+        }
         return json(res, 200, publicState(room, playerId));
       }
 

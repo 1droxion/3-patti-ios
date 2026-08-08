@@ -1,0 +1,53 @@
+3 PATTI SOCIAL — FINAL APPLE IAP LAUNCH SETUP
+Version 1.8.1 / Build 21
+
+PUBLIC MONETIZATION
+- New user starter balance: 25,000 Social Chips
+- Digital purchases use Apple In-App Purchase only
+- No direct Apple Pay checkout button
+- No PayPal checkout button
+- No cash deposits or withdrawals
+- Social chips have no cash value
+
+CONSUMABLE IN-APP PURCHASES
+1) com.droxion.threepatti.chips25k
+   Reference name: 25K Social Chips
+   Suggested US price: $0.99
+   Description: 25,000 virtual Social Chips for use in 3 Patti Social. No cash value.
+
+2) com.droxion.threepatti.chips150k
+   Reference name: 150K Social Chips
+   Suggested US price: $4.99
+   Description: 150,000 virtual Social Chips for use in 3 Patti Social. No cash value.
+
+3) com.droxion.threepatti.chips400k
+   Reference name: 400K Social Chips
+   Suggested US price: $9.99
+   Description: 400,000 virtual Social Chips for use in 3 Patti Social. No cash value.
+
+4) com.droxion.threepatti.chips1m
+   Reference name: 1M Social Chips
+   Suggested US price: $19.99
+   Description: 1,000,000 virtual Social Chips for use in 3 Patti Social. No cash value.
+
+AUTO-RENEWABLE SUBSCRIPTION
+Subscription group: 3 Patti VIP
+Product ID: com.droxion.threepatti.vip.monthly
+Reference name: VIP Monthly
+Duration: 1 month
+Suggested US price: $6.99/month
+Description: VIP badge and premium profile benefits. Does not change card odds or winning chances.
+
+BACKEND
+Set INITIAL_DEMO_CHIPS=25000
+For live App Store purchase delivery, configure the Apple IAP server credentials already documented in backend/.env.example.
+Do not set SOCIAL_IAP_MODE=live until persistent storage and Apple server verification credentials are configured.
+
+FINAL TEST
+1. Install Build 21 in TestFlight.
+2. New account receives 25,000 chips.
+3. Open BUY CHIPS.
+4. All five App Store products load with Apple prices.
+5. Buy a sandbox chip pack.
+6. Confirm chips are credited once only.
+7. Restore VIP and confirm VIP status returns.

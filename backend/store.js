@@ -54,7 +54,7 @@ export async function ensureUser({ externalPlayerId, displayName, avatar }) {
   const cleanAvatar = Math.max(1, Math.min(8, Number(avatar) || 1));
   const initialDemoChips = String(process.env.CASH_MODE_ENABLED || '').toLowerCase() === 'true'
     ? 0
-    : Number(process.env.INITIAL_DEMO_CHIPS || 10000);
+    : Number(process.env.INITIAL_DEMO_CHIPS || 25000);
 
   if (!supabaseReady()) {
     let user = memUsers.get(external);

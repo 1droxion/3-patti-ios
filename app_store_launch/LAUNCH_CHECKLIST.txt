@@ -1,5 +1,5 @@
 DO NOT SUBMIT UNTIL ALL ITEMS ARE YES:
-[ ] Vercel /health says version 1.7.1 and launchReadiness.ready=true
+[ ] Vercel /health says version 1.8.0 and launchReadiness.ready=true
 [ ] Supabase schema.sql applied and persistence.persistent=true
 [ ] AUTH_SECRET is 32+ random characters and AUTH_REQUIRED=true
 [ ] Apple IAP server credentials configured on Vercel
@@ -22,3 +22,8 @@ DO NOT SUBMIT UNTIL ALL ITEMS ARE YES:
 [ ] App Review notes pasted
 [ ] Build 19 selected
 [ ] App + first IAPs + VIP subscription group added to review submission
+
+[ ] Fresh account receives exactly 25,000 non-cash social chips
+[ ] Lobby BUY CHIPS opens Social Store
+[ ] All 5 App Store products return localized prices in TestFlight
+[ ] One consumable purchase credits chips exactly once

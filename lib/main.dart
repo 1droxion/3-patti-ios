@@ -95,7 +95,7 @@ class _ThreePattiAppState extends State<ThreePattiApp> {
 
 class AppSession extends ChangeNotifier {
   String displayName;
-  int walletChips = 10000;
+  int walletChips = 25000;
   int navPage = 0; // 0 home, 1 store, 2 history, 3 profile, 4 chips, 6 settings, 7 support, 8 rules, 9 privacy, 10 terms
   bool soundEnabled = true;
   bool musicEnabled = true;
@@ -565,6 +565,18 @@ class _LobbyViewState extends State<LobbyView> {
                       fontWeight: FontWeight.w800,
                       letterSpacing: .45,
                     ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFB77A08),
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 12, vertical: compact ? 6 : 8),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => widget.session.setPage(1),
+                    icon: const Icon(Icons.add_circle_rounded, size: 16),
+                    label: Text(compact ? 'BUY' : 'BUY CHIPS', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 10)),
                   ),
                   const Spacer(),
                   const _TierLegend(color: Color(0xFF76F06A), text: '5K'),
@@ -1320,7 +1332,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.7', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.8', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1375,17 +1387,18 @@ class _SocialOffer {
   final String id;
   final String title;
   final String subtitle;
+  final String launchPrice;
   final IconData icon;
   final bool vip;
-  const _SocialOffer(this.id, this.title, this.subtitle, this.icon, {this.vip = false});
+  const _SocialOffer(this.id, this.title, this.subtitle, this.launchPrice, this.icon, {this.vip = false});
 }
 
 const _socialOffers = <_SocialOffer>[
-  _SocialOffer('com.droxion.threepatti.chips25k', '25K CHIPS', 'Starter chip pack', Icons.paid_rounded),
-  _SocialOffer('com.droxion.threepatti.chips150k', '150K CHIPS', 'Best for regular play', Icons.stars_rounded),
-  _SocialOffer('com.droxion.threepatti.chips400k', '400K CHIPS', 'Big social chip pack', Icons.local_fire_department_rounded),
-  _SocialOffer('com.droxion.threepatti.chips1m', '1M CHIPS', 'Mega social chip pack', Icons.diamond_rounded),
-  _SocialOffer('com.droxion.threepatti.vip.monthly', 'VIP MONTHLY', 'Monthly VIP badge + premium status', Icons.workspace_premium_rounded, vip: true),
+  _SocialOffer('com.droxion.threepatti.chips25k', '25K CHIPS', 'Quick refill', r'$0.99', Icons.paid_rounded),
+  _SocialOffer('com.droxion.threepatti.chips150k', '150K CHIPS', 'Popular pack', r'$4.99', Icons.stars_rounded),
+  _SocialOffer('com.droxion.threepatti.chips400k', '400K CHIPS', 'Big social chip pack', r'$9.99', Icons.local_fire_department_rounded),
+  _SocialOffer('com.droxion.threepatti.chips1m', '1M CHIPS', 'Mega social chip pack', r'$19.99', Icons.diamond_rounded),
+  _SocialOffer('com.droxion.threepatti.vip.monthly', 'VIP MONTHLY', 'VIP badge + premium profile', r'$6.99/mo', Icons.workspace_premium_rounded, vip: true),
 ];
 
 class PageFrame extends StatelessWidget {
@@ -1485,7 +1498,7 @@ class _StoreViewState extends State<StoreView> {
         if (response.error != null) {
           message = 'App Store: ${response.error!.message}';
         } else if (products.isEmpty) {
-          message = 'Create the 5 products in App Store Connect to activate purchases.';
+          message = 'Chip packs are ready in the app. Activate the 5 product IDs in App Store Connect to enable checkout.';
         } else {
           message = 'SOCIAL CHIPS • ENTERTAINMENT ONLY • NO CASH VALUE';
         }
@@ -1507,7 +1520,7 @@ class _StoreViewState extends State<StoreView> {
   Future<void> _buy(_SocialOffer offer) async {
     final product = products[offer.id];
     if (!storeAvailable || product == null) {
-      setState(() => message = 'This product is not active in App Store Connect yet.');
+      setState(() => message = 'This pack is not active in App Store Connect yet. Digital chips must use Apple In-App Purchase.');
       return;
     }
     HapticFeedback.selectionClick();
@@ -1632,7 +1645,12 @@ class _StoreViewState extends State<StoreView> {
                         const SizedBox(height: 2),
                         Text(offer.subtitle, style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
                         const SizedBox(height: 8),
-                        Text(product?.price ?? 'SET UP IN APP STORE', style: TextStyle(fontSize: 11, color: product == null ? Colors.white38 : gold, fontWeight: FontWeight.w900)),
+                        Text(product?.price ?? offer.launchPrice, style: TextStyle(fontSize: 11, color: product == null ? Colors.white70 : gold, fontWeight: FontWeight.w900)),
+                        if (product == null)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Text('ACTIVATE IN APP STORE', style: TextStyle(fontSize: 7.5, color: Colors.orangeAccent, fontWeight: FontWeight.w900)),
+                          ),
                       ],
                     ),
                   ),

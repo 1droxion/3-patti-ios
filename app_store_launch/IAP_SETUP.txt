@@ -1,15 +1,32 @@
-Create these exact products in App Store Connect before review:
+3 PATTI SOCIAL V1.8 — APP STORE IN-APP PURCHASE SETUP
+
+IMPORTANT
+Digital social chips must be sold with Apple In-App Purchase. Do not add direct Apple Pay, PayPal, Stripe, card, or web checkout buttons for these digital chips inside the iOS app.
+
+NEW PLAYER BONUS
+Every brand-new server account starts with 25,000 SOCIAL CHIPS at no charge. Existing accounts are not automatically topped up.
+
+CREATE THESE EXACT PRODUCTS IN APP STORE CONNECT
 
 CONSUMABLES
-com.droxion.threepatti.chips25k   — 25K Social Chips   — suggested $0.99
-com.droxion.threepatti.chips150k  — 150K Social Chips  — suggested $4.99
-com.droxion.threepatti.chips400k  — 400K Social Chips  — suggested $9.99
-com.droxion.threepatti.chips1m    — 1M Social Chips    — suggested $19.99
+com.droxion.threepatti.chips25k   — 25K Social Chips   — US launch price $0.99
+com.droxion.threepatti.chips150k  — 150K Social Chips  — US launch price $4.99
+com.droxion.threepatti.chips400k  — 400K Social Chips  — US launch price $9.99
+com.droxion.threepatti.chips1m    — 1M Social Chips    — US launch price $19.99
 
 AUTO-RENEWABLE SUBSCRIPTION
 Create subscription group: 3 Patti Social VIP
-com.droxion.threepatti.vip.monthly — VIP Monthly — 1 month — suggested $6.99/month
+com.droxion.threepatti.vip.monthly — VIP Monthly — 1 month — US launch price $6.99/month
 
 VIP description: Monthly VIP badge and premium profile status. VIP does not affect card odds or winning chances.
 
-Add localization, price, availability and review screenshot for every product. Add the app version + first IAPs/subscription group to the same App Review submission.
+FOR EACH PRODUCT
+1. Add English (U.S.) display name + description.
+2. Set price.
+3. Make available in the United States (and any other storefronts you choose).
+4. Add App Review screenshot.
+5. Save.
+6. Add the first IAPs/subscription and app version to the same App Review submission.
+
+TESTFLIGHT
+After products propagate, open Store in Build 20. The app should replace the launch-price text with Apple's live localized ProductDetails.price. Tapping the card opens Apple's In-App Purchase sheet.

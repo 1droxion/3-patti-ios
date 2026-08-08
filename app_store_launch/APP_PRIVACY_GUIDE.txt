@@ -1,0 +1,13 @@
+Suggested App Privacy declarations based on V1.7 code. Confirm against every production service/SDK you actually enable.
+
+Collected and linked to user/account:
+- Identifiers: User ID — App Functionality, Fraud Prevention/Security
+- Purchases: Purchase History — App Functionality, Fraud Prevention/Security
+- User Content: Customer Support — App Functionality
+- Usage Data: Product Interaction / gameplay activity — App Functionality, Fraud Prevention/Security
+- Contact Info: Email — only if voluntarily supplied in Support; App Functionality
+
+Not used for tracking.
+No precise location.
+No financial information/card numbers collected by this app.
+No real-money payment or withdrawal information in V1.7.

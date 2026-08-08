@@ -1,0 +1,32 @@
+APP NAME
+3 Patti Social
+
+SUBTITLE
+Live Social Teen Patti
+
+PRIMARY CATEGORY
+Games > Card
+
+DESCRIPTION
+Play live multiplayer Teen Patti with friends and players online in a premium social card-game experience.
+
+• 1 VS 1 and 3–10 player tables
+• Blind, Seen/Chaal, Pack, Show and Side Show
+• Live player profiles and avatars
+• Round timer, chips, dealer animations and sounds
+• New Round, Switch Table and Exit
+• Virtual social-chip packs and VIP through Apple In-App Purchase
+
+3 Patti Social is entertainment only. Virtual chips have no cash value and cannot be withdrawn, redeemed, transferred, sold, or exchanged for money or prizes. Purchases do not affect card odds or winning chances.
+
+KEYWORDS
+teen patti,3 patti,card game,indian cards,multiplayer,social game,three cards
+
+PRIVACY POLICY URL
+https://3-patti-ios.vercel.app/privacy
+
+SUPPORT URL
+https://3-patti-ios.vercel.app/support
+
+TERMS URL
+https://3-patti-ios.vercel.app/terms

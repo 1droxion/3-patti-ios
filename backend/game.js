@@ -19,6 +19,14 @@ export function json(res, code, data) {
   res.end(body);
 }
 
+export function html(res, code, body) {
+  res.writeHead(code, {'content-type':'text/html; charset=utf-8','cache-control':'public, max-age=300','x-content-type-options':'nosniff','referrer-policy':'no-referrer'}); res.end(body);
+}
+const pageStyle=`body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:820px;margin:40px auto;padding:0 20px;line-height:1.55;background:#06110c;color:#f4f0e8}h1,h2{color:#f4c34d}a{color:#7be49a}.card{background:#0a1c14;border:1px solid #705719;border-radius:16px;padding:20px}input,textarea,button{box-sizing:border-box;width:100%;padding:12px;margin:7px 0;border-radius:10px;border:1px solid #705719;background:#0b1f16;color:white}button{background:#a26a08;font-weight:700;cursor:pointer}`;
+const privacyPage=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3 Patti Social Privacy Policy</title><style>${pageStyle}</style></head><body><h1>3 Patti Social Privacy Policy</h1><div class="card"><p><b>Last updated: August 7, 2026</b></p><h2>Social game only</h2><p>3 Patti Social is a social entertainment card game. Virtual chips have no cash value and cannot be withdrawn or redeemed for money or prizes.</p><h2>Data we process</h2><p>We may process a pseudonymous player ID, display name, selected avatar, social-chip balance, gameplay/table activity, support requests, in-app purchase transaction identifiers, and technical/network information needed to operate, secure, and troubleshoot the service.</p><h2>Data this release does not collect</h2><p>The public social release does not require government-ID numbers, tax identifiers, bank-account details, cash deposits, or cash-withdrawal information.</p><h2>Apple purchases</h2><p>Virtual chip packs and VIP are purchased through Apple In-App Purchase. We receive transaction information needed to validate and deliver digital items. We do not receive your full payment-card number from Apple.</p><h2>Deletion</h2><p>You can delete your account from Settings. Limited anonymized integrity, fraud-prevention, purchase, or security records may be retained where reasonably necessary.</p><h2>Contact</h2><p>Use the in-app Support screen or our <a href="/support">Support page</a>.</p><p><a href="/terms">Terms of Use</a></p></div></body></html>`;
+const termsPage=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3 Patti Social Terms</title><style>${pageStyle}</style></head><body><h1>3 Patti Social Terms of Use</h1><div class="card"><p><b>Last updated: August 7, 2026</b></p><h2>Social entertainment only</h2><p>Virtual chips are entertainment credits only and cannot be redeemed for cash, prizes, or anything of value.</p><h2>Fair play</h2><p>Do not exploit bugs, automate gameplay, collude, impersonate another player, manipulate network traffic, or attempt to alter balances, cards, or game results.</p><h2>Purchases</h2><p>Chip packs are consumable digital items. VIP Monthly is an auto-renewable subscription billed through Apple and can be managed or canceled through Apple subscription settings. Purchases do not affect card odds.</p><h2>No real-money wagering</h2><p>This public release does not accept cash wagers, award cash winnings, or provide cash withdrawals.</p><p><a href="/privacy">Privacy Policy</a> · <a href="/support">Support</a></p></div></body></html>`;
+const supportPage=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3 Patti Social Support</title><style>${pageStyle}</style></head><body><h1>3 Patti Social Support</h1><div class="card"><p>Send us a support request. Do not include passwords, full payment-card numbers, or government ID numbers.</p><input id="email" type="email" placeholder="Email for reply (optional)"><textarea id="message" rows="6" maxlength="1200" placeholder="How can we help?"></textarea><button onclick="sendTicket()">Send support request</button><p id="result"></p><p><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p></div><script>async function sendTicket(){const r=document.getElementById('result');r.textContent='Sending…';try{const res=await fetch('/public/support-ticket',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,message:document.getElementById('message').value})});const d=await res.json();if(!res.ok)throw new Error(d.error||'Request failed');r.textContent='Ticket '+d.ticketId+' created. Thank you.';document.getElementById('message').value='';}catch(e){r.textContent='Could not send: '+e.message;}}</script></body></html>`;
+
 export function readBody(req) {
   if (req.body !== undefined && req.body !== null) {
     if (typeof req.body === 'object') return Promise.resolve(req.body);
@@ -618,7 +626,7 @@ function vipActive(user) {
 }
 
 function socialIapMode() {
-  const mode = String(process.env.SOCIAL_IAP_MODE || 'sandbox').toLowerCase();
+  const mode = String(process.env.SOCIAL_IAP_MODE || 'live').toLowerCase();
   return mode === 'live' ? 'live' : 'sandbox';
 }
 
@@ -660,23 +668,13 @@ function decodeJwsPayload(jws) {
 }
 
 async function verifyAppleTransaction(transactionId, expectedProductId) {
-  const environment = String(process.env.APPLE_IAP_ENV || (socialIapMode() === 'live' ? 'production' : 'sandbox')).toLowerCase();
-  const base = environment === 'production'
-    ? 'https://api.storekit.itunes.apple.com'
-    : 'https://api.storekit-sandbox.itunes.apple.com';
-  const token = makeAppleServerJwt();
-  const response = await fetch(`${base}/inApps/v1/transactions/${encodeURIComponent(transactionId)}`, {
-    headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.errorMessage || `Apple transaction verification failed (${response.status})`);
-  const tx = decodeJwsPayload(data.signedTransactionInfo);
-  if (String(tx.transactionId || '') !== String(transactionId)) throw new Error('Apple transaction ID mismatch');
-  if (String(tx.productId || '') !== String(expectedProductId)) throw new Error('Apple product ID mismatch');
-  if (String(tx.bundleId || '') !== String(process.env.APPLE_BUNDLE_ID)) throw new Error('Apple bundle ID mismatch');
-  if (tx.revocationDate) throw new Error('Apple transaction was revoked');
-  return tx;
+  const configured=String(process.env.APPLE_IAP_ENV||'auto').toLowerCase(); const envs=configured==='production'?['production']:configured==='sandbox'?['sandbox']:['production','sandbox'];
+  const token=makeAppleServerJwt(); let lastError=null;
+  for(const environment of envs){const base=environment==='production'?'https://api.storekit.itunes.apple.com':'https://api.storekit-sandbox.itunes.apple.com';try{const response=await fetch(`${base}/inApps/v1/transactions/${encodeURIComponent(transactionId)}`,{headers:{authorization:`Bearer ${token}`,accept:'application/json'}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data?.errorMessage||`Apple transaction verification failed (${response.status})`);const tx=decodeJwsPayload(data.signedTransactionInfo);if(String(tx.transactionId||'')!==String(transactionId))throw new Error('Apple transaction ID mismatch');if(String(tx.productId||'')!==String(expectedProductId))throw new Error('Apple product ID mismatch');if(String(tx.bundleId||'')!==String(process.env.APPLE_BUNDLE_ID))throw new Error('Apple bundle ID mismatch');if(tx.revocationDate)throw new Error('Apple transaction was revoked');return {...tx,verifiedEnvironment:environment};}catch(e){lastError=e;}}
+  throw lastError||new Error('Apple transaction verification failed');
 }
+function launchReadiness(){const persistence=store.persistenceStatus();const security=securityStatus();const iapLive=socialIapMode()==='live';const apple=appleIapConfigReady();return {ready:persistence.persistent&&security.authSecretConfigured&&security.authRequired&&iapLive&&apple,persistence,security,iapLive,appleIapVerificationConfigured:apple};}
+
 
 
 export async function handle(req, res, forcedRoute = '') {
@@ -687,18 +685,19 @@ export async function handle(req, res, forcedRoute = '') {
 
   try {
     if (req.method === 'GET' && (route === '' || route === 'health')) {
-      const readiness = paymentReadiness();
       return json(res, 200, {
-        ok: true,
-        version: '1.6.0',
-        cachedRooms: rooms.size,
-        persistence: readiness.persistence,
-        security: readiness.security,
-        cashModeRequested: readiness.requested,
-        cashModeEnabled: readiness.enabled,
-        cashModeBlockers: readiness.blockers,
+        ok: true, version: '1.7.0', productMode: 'social-only', virtualChipsCashValue: false, withdrawalsEnabled: false, cachedRooms: rooms.size,
+        persistence: store.persistenceStatus(), security: securityStatus(), socialIapMode: socialIapMode(), appleIapVerificationConfigured: appleIapConfigReady(), launchReadiness: launchReadiness(),
       });
     }
+
+    if(req.method==='GET'&&route==='privacy')return html(res,200,privacyPage);
+    if(req.method==='GET'&&route==='terms')return html(res,200,termsPage);
+    if(req.method==='GET'&&route==='support')return html(res,200,supportPage);
+    if(req.method==='POST'&&route==='public/support-ticket'){const body=await readBody(req);const message=String(body.message||'').trim();if(message.length<10)return json(res,400,{error:'Message must be at least 10 characters'});const ticket=await store.createSupportTicket({email:body.email,message});return json(res,200,{ok:true,ticketId:ticket.id});}
+    const allowUnsafeDev=String(process.env.ALLOW_UNSAFE_DEVELOPMENT||'').toLowerCase()==='true';const ready=launchReadiness();
+    if(!allowUnsafeDev&&!ready.persistence.persistent)return json(res,503,{error:'Service setup incomplete: persistent database is required',launchReadiness:ready});
+    if(!allowUnsafeDev&&(!ready.security.authSecretConfigured||!ready.security.authRequired))return json(res,503,{error:'Service setup incomplete: secure authentication is required',launchReadiness:ready});
 
     if (req.method === 'POST' && route === 'auth/bootstrap') {
       const body = await readBody(req);
@@ -719,124 +718,12 @@ export async function handle(req, res, forcedRoute = '') {
           playerId,
           name: user.display_name,
           avatar: user.avatar,
-          kycStatus: user.kyc_status,
-          ageVerified: Boolean(user.age_verified),
-          geoState: user.geo_state,
-          cashEligible: Boolean(user.cash_eligible),
+          vipActive: vipActive(user),
         },
         wallet: {
           chips: Number(wallet?.chip_balance || 0),
-          usdCents: Number(wallet?.usd_cents || 0),
         },
       });
-    }
-
-
-    if (req.method === 'GET' && route === 'kyc/status') {
-      const playerId = String(url.searchParams.get('playerId') || '');
-      const auth = requirePlayerAuth(req, playerId);
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-      const eligibility = userCashEligibility(user);
-      return json(res, 200, {
-        ok: true,
-        profile: {
-          legalName: user.legal_name || '',
-          email: user.email || '',
-          phone: user.phone || '',
-          dob: user.dob || '',
-          homeAddress: user.home_address || '',
-          taxIdType: user.tax_id_type || '',
-          taxIdLast4: user.tax_id_last4 || '',
-          governmentIdType: user.government_id_type || '',
-          governmentIdLast4: user.government_id_last4 || '',
-          ageDeclared21: Boolean(user.age_declared_21),
-        },
-        verification: {
-          kycStatus: user.kyc_status || 'unverified',
-          ageVerified: Boolean(user.age_verified),
-          geoState: user.geo_state || null,
-          cashEligible: eligibility.eligible,
-          blockers: eligibility.blockers,
-        },
-      });
-    }
-
-    if (req.method === 'POST' && route === 'kyc/profile') {
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const auth = requirePlayerAuth(req, playerId);
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-
-      const legalName = String(body.legalName || '').trim();
-      const email = String(body.email || '').trim().toLowerCase();
-      const phone = String(body.phone || '').trim();
-      const dob = String(body.dob || '').trim();
-      const homeAddress = String(body.homeAddress || '').trim();
-      const taxIdType = String(body.taxIdType || '').trim().toLowerCase();
-      const taxId = String(body.taxId || '').trim();
-      const governmentIdType = String(body.governmentIdType || '').trim().toLowerCase();
-      const governmentId = String(body.governmentId || '').trim();
-      const ageDeclared21 = body.ageDeclared21 === true;
-      const age = calculateAge(dob);
-
-      if (legalName.length < 3) return json(res, 400, { error: 'Full legal name required' });
-      if (!email.includes('@') || email.length < 5) return json(res, 400, { error: 'Valid email required' });
-      if (phone.replace(/\D/g, '').length < 10) return json(res, 400, { error: 'Valid mobile number required' });
-      if (age === null) return json(res, 400, { error: 'Valid date of birth required' });
-      if (age < 21 || !ageDeclared21) return json(res, 403, { error: 'Cash gaming verification requires age 21+' });
-      if (homeAddress.length < 8) return json(res, 400, { error: 'Home address required' });
-      if (!['license', 'passport'].includes(governmentIdType)) return json(res, 400, { error: 'Driver license or passport required' });
-      if (governmentId.replace(/[^A-Za-z0-9]/g, '').length < 5) return json(res, 400, { error: 'Government ID number required' });
-      if (taxId && !['ssn', 'tin'].includes(taxIdType)) return json(res, 400, { error: 'Choose SSN or TIN for optional tax ID' });
-
-      const taxIdHash = taxId ? createHash('sha256').update(`${process.env.KYC_HASH_PEPPER || process.env.AUTH_SECRET || 'dev'}:${taxId}`).digest('hex') : null;
-      const governmentIdHash = createHash('sha256').update(`${process.env.KYC_HASH_PEPPER || process.env.AUTH_SECRET || 'dev'}:${governmentId}`).digest('hex');
-      const updated = await store.updateKycProfile({
-        userId: user.id,
-        legalName,
-        email,
-        phone,
-        dob,
-        homeAddress,
-        taxIdType: taxId ? taxIdType : null,
-        taxIdLast4: cleanLast4(taxId),
-        taxIdHash,
-        governmentIdType,
-        governmentIdLast4: cleanLast4(governmentId),
-        governmentIdHash,
-        ageDeclared21: true,
-      });
-      await store.audit({ actorUserId: user.id, eventType: 'kyc_profile_submitted', referenceId: user.id, metadata: { governmentIdType, taxIdProvided: Boolean(taxId), age } });
-      return json(res, 200, {
-        ok: true,
-        status: updated.kyc_status || 'submitted',
-        message: 'Identity details saved securely. Verification is pending the approved KYC provider.',
-        rawTaxIdStored: false,
-        rawGovernmentIdStored: false,
-      });
-    }
-
-    if (req.method === 'POST' && route === 'kyc/provider-webhook') {
-      const expected = String(process.env.KYC_WEBHOOK_SECRET || '');
-      const provided = String(req.headers['x-kyc-webhook-secret'] || '');
-      if (!expected || provided !== expected) return json(res, 401, { error: 'Invalid KYC webhook secret' });
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const status = String(body.status || '').toLowerCase();
-      if (!['verified', 'failed', 'pending'].includes(status)) return json(res, 400, { error: 'Invalid KYC status' });
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      const approvedStates = approvedCashStates();
-      const geoState = String(body.geoState || user.geo_state || '').toUpperCase() || null;
-      const ageVerified = body.ageVerified === true;
-      const cashEligible = status === 'verified' && ageVerified && geoState && approvedStates.includes(geoState);
-      const updated = await store.setKycVerification({ userId: user.id, status, ageVerified, geoState, cashEligible });
-      await store.audit({ actorUserId: user.id, eventType: 'kyc_provider_result', referenceId: String(body.verificationId || ''), metadata: { status, ageVerified, geoState, cashEligible } });
-      return json(res, 200, { ok: true, kycStatus: updated.kyc_status, ageVerified: updated.age_verified, geoState: updated.geo_state, cashEligible: updated.cash_eligible });
     }
 
 
@@ -873,6 +760,7 @@ export async function handle(req, res, forcedRoute = '') {
       if (!transactionId || transactionId.length < 3) return json(res, 400, { error: 'Transaction ID required' });
 
       const mode = socialIapMode();
+      if (mode === 'live' && !store.persistenceStatus().persistent) return json(res, 503, { error: 'Live IAP delivery requires persistent storage' });
       let verifiedTransaction = null;
       if (mode === 'live') {
         if (!appleIapConfigReady()) return json(res, 503, { error: 'Live App Store verification credentials are not configured' });
@@ -899,10 +787,11 @@ export async function handle(req, res, forcedRoute = '') {
       });
 
       let updatedUser = user;
-      if (product.type === 'vip' && !walletResult.idempotent) {
-        const current = user.vip_until ? new Date(user.vip_until).getTime() : 0;
-        const base = Math.max(Date.now(), Number.isFinite(current) ? current : 0);
-        const until = new Date(base + Number(product.vipDays || 31) * 86400000).toISOString();
+      if (product.type === 'vip') {
+        let until;
+        if (verifiedTransaction?.expiresDate) until = new Date(Number(verifiedTransaction.expiresDate)).toISOString();
+        else if (mode === 'live') throw new Error('Verified VIP subscription is missing expiration data');
+        else { const current = user.vip_until ? new Date(user.vip_until).getTime() : 0; const base = Math.max(Date.now(), Number.isFinite(current) ? current : 0); until = new Date(base + Number(product.vipDays || 31) * 86400000).toISOString(); }
         updatedUser = await store.setVipUntil({ userId: user.id, vipUntil: until });
       }
       await store.audit({
@@ -923,124 +812,11 @@ export async function handle(req, res, forcedRoute = '') {
       });
     }
 
+    if(req.method==='POST'&&route==='social/support-ticket'){const body=await readBody(req);const playerId=String(body.playerId||'').trim();const auth=requirePlayerAuth(req,playerId);const user=await store.getUserByExternalId(playerId);if(!user)return json(res,404,{error:'Account not found'});if(auth?.aid&&String(auth.aid)!==String(user.id))return json(res,403,{error:'Account mismatch'});const message=String(body.message||'').trim();if(message.length<10)return json(res,400,{error:'Message must be at least 10 characters'});const ticket=await store.createSupportTicket({userId:user.id,email:body.email,message});await store.audit({actorUserId:user.id,eventType:'support_ticket_created',referenceId:ticket.id,metadata:{}});return json(res,200,{ok:true,ticketId:ticket.id});}
+    if(req.method==='POST'&&route==='account/delete'){const body=await readBody(req);const playerId=String(body.playerId||'').trim();const auth=requirePlayerAuth(req,playerId);const user=await store.getUserByExternalId(playerId);if(!user)return json(res,200,{ok:true,alreadyDeleted:true});if(auth?.aid&&String(auth.aid)!==String(user.id))return json(res,403,{error:'Account mismatch'});await store.audit({actorUserId:user.id,eventType:'account_delete_requested',referenceId:user.id,metadata:{}});await store.deleteUserAccount({userId:user.id,externalPlayerId:playerId});return json(res,200,{ok:true,deleted:true});}
+
     if (req.method === 'GET' && route === 'lobby') {
       return json(res, 200, await lobbyState());
-    }
-
-    if (req.method === 'GET' && route === 'payments-config') {
-      const readiness = paymentReadiness();
-      const approvedStates = String(process.env.APPROVED_CASH_STATES || '')
-        .split(',').map(v => v.trim().toUpperCase()).filter(Boolean);
-      return json(res, 200, {
-        cashModeEnabled: readiness.enabled,
-        cashModeRequested: readiness.requested,
-        blockers: readiness.blockers,
-        chipsPerUsd: 100,
-        mode: readiness.enabled ? 'live_ready' : 'sandbox_locked',
-        approvedStates,
-        depositMethods: [
-          { id: 'apple_pay', label: 'Apple Pay', enabled: readiness.enabled && String(process.env.APPLE_PAY_LIVE || '').toLowerCase() === 'true' },
-          { id: 'cash_app', label: 'Cash App Pay', enabled: readiness.enabled && String(process.env.CASH_APP_LIVE || '').toLowerCase() === 'true' },
-          { id: 'card', label: 'Debit / credit card', enabled: readiness.enabled && String(process.env.CARD_PAYMENTS_LIVE || '').toLowerCase() === 'true' },
-        ],
-        withdrawalMethods: [
-          { id: 'paypal', label: 'PayPal', enabled: readiness.enabled && String(process.env.PAYPAL_LIVE || '').toLowerCase() === 'true' },
-          { id: 'bank', label: 'Bank / ACH', enabled: readiness.enabled && String(process.env.BANK_PAYOUTS_LIVE || '').toLowerCase() === 'true' },
-        ],
-      });
-    }
-
-    if (req.method === 'GET' && route === 'wallet') {
-      const playerId = String(url.searchParams.get('playerId') || '');
-      const auth = requirePlayerAuth(req, playerId);
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-      const wallet = await store.getWallet(user.id);
-      return json(res, 200, { ok: true, chips: Number(wallet?.chip_balance || 0), usdCents: Number(wallet?.usd_cents || 0) });
-    }
-
-
-    if (req.method === 'POST' && route === 'deposit-live') {
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const auth = requirePlayerAuth(req, playerId);
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-      const eligibility = userCashEligibility(user);
-      if (!eligibility.eligible) return json(res, 403, { error: 'Real-money deposit is locked', blockers: eligibility.blockers });
-      return json(res, 503, { error: 'Live deposit adapter is not connected. Do not credit money without a signed provider webhook.' });
-    }
-
-    if (req.method === 'POST' && route === 'withdraw-live') {
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const auth = requirePlayerAuth(req, playerId);
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-      const eligibility = userCashEligibility(user);
-      if (!eligibility.eligible) return json(res, 403, { error: 'Real-money withdrawal is locked', blockers: eligibility.blockers });
-      return json(res, 503, { error: 'Live payout adapter is not connected. Do not mark a payout completed without a signed provider webhook.' });
-    }
-
-    if (req.method === 'POST' && route === 'deposit-sandbox') {
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const auth = requirePlayerAuth(req, playerId);
-      const provider = String(body.provider || '').trim();
-      const amountUsd = Number(body.amountUsd || 0);
-      if (!['apple_pay', 'cash_app', 'card'].includes(provider)) return json(res, 400, { error: 'Unsupported deposit provider' });
-      if (![5, 10, 25, 50].includes(amountUsd)) return json(res, 400, { error: 'Sandbox amount must be 5, 10, 25, or 50 USD' });
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-      const requestId = `DEP-SANDBOX-${randomUUID()}`;
-      const chips = Math.round(amountUsd * 100);
-      await store.createPaymentRequest({
-        userId: user.id, direction: 'deposit', provider, amountUsdCents: Math.round(amountUsd * 100), chips,
-        status: 'sandbox_approved', metadata: { cashValue: false },
-      });
-      const wallet = await store.applyWalletTransaction({
-        userId: user.id, chipsDelta: chips, type: 'sandbox_deposit', referenceId: requestId,
-        metadata: { provider, amountUsd, cashValue: false },
-      });
-      await store.audit({ actorUserId: user.id, eventType: 'sandbox_deposit', referenceId: requestId, metadata: { provider, amountUsd, chips } });
-      return json(res, 200, {
-        ok: true, mode: 'sandbox', provider, status: 'simulated_approved', requestId, amountUsd, chips,
-        walletChips: Number(wallet.chip_balance || 0),
-      });
-    }
-
-    if (req.method === 'POST' && route === 'withdraw-sandbox') {
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const auth = requirePlayerAuth(req, playerId);
-      const provider = String(body.provider || 'paypal').trim();
-      const destination = String(body.destination || body.paypalEmail || '').trim();
-      const chips = Number(body.chips || 0);
-      if (!['paypal', 'bank'].includes(provider)) return json(res, 400, { error: 'Unsupported withdrawal provider' });
-      if (provider === 'paypal' && !destination.includes('@')) return json(res, 400, { error: 'Valid PayPal email required' });
-      if (provider === 'bank' && destination.length < 4) return json(res, 400, { error: 'Bank payout reference required' });
-      if (!Number.isInteger(chips) || chips <= 0) return json(res, 400, { error: 'Valid chip amount required' });
-      const user = await store.getUserByExternalId(playerId);
-      if (!user) return json(res, 404, { error: 'Account not found' });
-      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
-      const requestId = `WD-SANDBOX-${randomUUID()}`;
-      const wallet = await store.applyWalletTransaction({
-        userId: user.id, chipsDelta: -chips, type: 'sandbox_withdraw_hold', referenceId: requestId,
-        metadata: { provider, cashValue: false },
-      });
-      await store.createPaymentRequest({
-        userId: user.id, direction: 'withdrawal', provider, amountUsdCents: Math.round(chips), chips,
-        destinationMasked: maskDestination(provider, destination), status: 'sandbox_held', metadata: { cashValue: false, requestId },
-      });
-      await store.audit({ actorUserId: user.id, eventType: 'sandbox_withdrawal', referenceId: requestId, metadata: { provider, chips } });
-      return json(res, 200, {
-        ok: true, mode: 'sandbox', provider, status: 'not_sent', requestId, chips,
-        usdPreview: Number((chips / 100).toFixed(2)), walletChips: Number(wallet.chip_balance || 0),
-      });
     }
 
     if (req.method === 'POST' && route === 'join') {

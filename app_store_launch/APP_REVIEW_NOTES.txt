@@ -1,0 +1,19 @@
+3 Patti Social is a SOCIAL-ONLY Teen Patti card game.
+
+IMPORTANT:
+- There is NO real-money gambling.
+- Virtual chips have NO cash value.
+- Chips cannot be withdrawn, sold, transferred, redeemed for USD, prizes, gift cards, or anything of value.
+- The app contains NO PayPal, bank withdrawal, cash deposit, KYC, or cash-out functionality.
+- Digital chip packs and VIP are sold only through Apple In-App Purchase.
+- VIP does not affect shuffle/card odds or winning chances.
+- Account deletion is available in Menu > Settings > Delete Account & Data.
+- Privacy: https://3-patti-ios.vercel.app/privacy
+- Support: https://3-patti-ios.vercel.app/support
+
+Testing:
+1. Open the app in landscape.
+2. Choose a live room.
+3. Use Blind / Seen Card / Chaal / Pack / Show / Side Show.
+4. Store is in Menu > Store.
+5. Restore Purchases is shown in the Store.

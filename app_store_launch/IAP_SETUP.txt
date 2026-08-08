@@ -1,0 +1,15 @@
+Create these exact products in App Store Connect before review:
+
+CONSUMABLES
+com.droxion.threepatti.chips25k   — 25K Social Chips   — suggested $0.99
+com.droxion.threepatti.chips150k  — 150K Social Chips  — suggested $4.99
+com.droxion.threepatti.chips400k  — 400K Social Chips  — suggested $9.99
+com.droxion.threepatti.chips1m    — 1M Social Chips    — suggested $19.99
+
+AUTO-RENEWABLE SUBSCRIPTION
+Create subscription group: 3 Patti Social VIP
+com.droxion.threepatti.vip.monthly — VIP Monthly — 1 month — suggested $6.99/month
+
+VIP description: Monthly VIP badge and premium profile status. VIP does not affect card odds or winning chances.
+
+Add localization, price, availability and review screenshot for every product. Add the app version + first IAPs/subscription group to the same App Review submission.

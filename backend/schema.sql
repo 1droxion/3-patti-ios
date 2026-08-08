@@ -202,3 +202,26 @@ alter table public.users add column if not exists age_declared_21 boolean not nu
 
 -- V1.6 social monetization. Social chips have no cash redemption value.
 alter table public.users add column if not exists vip_until timestamptz;
+
+
+-- V1.7 public social-launch support inbox.
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.users(id) on delete set null,
+  email text,
+  message text not null,
+  status text not null default 'open',
+  created_at timestamptz not null default now()
+);
+create index if not exists support_tickets_status_idx on public.support_tickets(status, created_at desc);
+
+-- V1.7 public social-launch support inbox.
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.users(id) on delete set null,
+  email text,
+  message text not null,
+  status text not null default 'open',
+  created_at timestamptz not null default now()
+);
+create index if not exists support_tickets_status_idx on public.support_tickets(status, created_at desc);

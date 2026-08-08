@@ -1,105 +1,32 @@
-# 3 Patti Social V1.6 — Social Launch Monetization
+# 3 Patti Social V1.7 Launch Candidate — Build 18
 
-Version: **1.6.0+17**
+Public social-only App Store candidate.
 
-This is the social-only launch build. Real-money deposit/withdrawal UI is removed from normal navigation. The dormant future cash/KYC backend foundation remains in the codebase, but cash mode stays OFF.
+Changes:
+- Removes dormant KYC, PayPal, bank, deposit and withdrawal UI from the public Flutter binary.
+- Social chips only; no cash value or redemption.
+- Real server-side account deletion from Settings.
+- Working in-app support ticket form.
+- Public Privacy, Terms and Support pages hosted by the backend.
+- App Store IAP delivery now fails closed: StoreKit transactions are completed only after server delivery succeeds.
+- Live IAP requires persistent storage and Apple server verification.
+- Apple transaction verification automatically tries production then sandbox for App Review/TestFlight compatibility.
+- VIP uses Apple's verified subscription expiration when live.
+- Backend fails closed in public mode if Supabase/auth are not configured.
+- Version 1.7.0+18.
 
-## Social monetization in this build
-
-Apple In-App Purchase is wired through Flutter's official `in_app_purchase` plugin.
-
-Create these products in App Store Connect with the exact Product IDs:
-
-### Consumable IAPs
-- `com.droxion.threepatti.chips25k` — 25K Social Chips — suggested $0.99
-- `com.droxion.threepatti.chips150k` — 150K Social Chips — suggested $4.99
-- `com.droxion.threepatti.chips400k` — 400K Social Chips — suggested $9.99
-- `com.droxion.threepatti.chips1m` — 1M Social Chips — suggested $19.99
-
-### Auto-renewable subscription
-- `com.droxion.threepatti.vip.monthly` — VIP Monthly — suggested $6.99/month
-
-VIP currently gives a visible VIP badge/status. Add more cosmetic VIP benefits later, but do not make VIP change card odds.
-
-## Important social-chip rule
-
-Purchased chips are virtual entertainment credits only:
-- no cash value
-- no PayPal/bank withdrawal
-- no USD conversion
-- no transfer or resale
-- no physical prize redemption
-
-The 5% table fee is a virtual-chip economy sink, not a cash gambling rake in this release.
-
-## App Store purchase security
-
-`SOCIAL_IAP_MODE=sandbox` is for TestFlight/development.
-
-For production, set `SOCIAL_IAP_MODE=live` only after Apple server transaction verification credentials are configured:
-- `APPLE_BUNDLE_ID=com.droxion.threepatti`
-- `APPLE_IAP_ISSUER_ID`
-- `APPLE_IAP_KEY_ID`
-- `APPLE_IAP_PRIVATE_KEY`
-- `APPLE_IAP_ENV=production`
-
-When live mode is enabled the backend verifies the transaction with Apple's App Store Server API before delivering chips/VIP. Transaction IDs are idempotent, so the same purchase cannot be credited twice.
-
-## What changed from V1.5
-
-- New Social Store
-- 4 virtual chip packs
-- VIP Monthly
-- StoreKit purchase stream + restore purchases
-- server-side social product catalog
-- server wallet delivery after purchase claim
-- duplicate transaction protection
-- Apple App Store Server API verification path for live mode
-- VIP status stored in backend and displayed at player seats
-- Withdraw removed from menu
-- Cash deposit methods removed from player-facing Wallet
-- KYC button removed from normal Profile
-- Wallet renamed Social Chips
-- Rules rewritten for social-only launch
-- Version 1.6.0 Build 17
-
-## Install in Codespaces
+## Install
+Upload this ZIP into the root of your existing repo and run:
 
 ```bash
 cd /workspaces/3-patti-ios
-unzip -o three_patti_v16_social_launch.zip
-rm three_patti_v16_social_launch.zip
+unzip -o three_patti_v17_app_store_launch.zip
+rm three_patti_v17_app_store_launch.zip
 flutter pub get
 git add .
-git commit -m "V1.6 social launch monetization"
+git commit -m "V1.7 App Store social launch candidate"
 git push
 ```
 
-## Vercel
-
-Keep real-money switches OFF.
-
-For TestFlight social IAP testing add:
-
-```text
-SOCIAL_IAP_MODE=sandbox
-APPLE_IAP_ENV=sandbox
-APPLE_BUNDLE_ID=com.droxion.threepatti
-```
-
-The Apple server credentials can be added when you are ready for production receipt verification.
-
-## Before App Store public launch
-
-1. Complete Apple's Paid Apps agreement / tax / banking setup in App Store Connect.
-2. Create the 4 consumable IAP products above.
-3. Create a subscription group and the VIP Monthly subscription.
-4. Add product names/descriptions/prices and review information.
-5. Test all purchases in TestFlight/Sandbox.
-6. Configure Apple server transaction credentials on Vercel.
-7. Set `SOCIAL_IAP_MODE=live` only after verification works.
-8. Submit the app + IAPs/subscription for App Review.
-
-## Rewarded ads
-
-Not enabled in this ZIP yet. AdMob needs your own AdMob iOS App ID and Rewarded Ad Unit ID in the iOS project. Do not publish using Google's test ad IDs. Add this after the App Store social-chip purchase flow is stable.
+Then configure Vercel using backend/.env.example and run backend/schema.sql in Supabase.
+See app_store_launch/ for App Store metadata, IAP IDs, privacy guidance, review notes, age-rating guidance and the final launch checklist.

@@ -1,0 +1,24 @@
+DO NOT SUBMIT UNTIL ALL ITEMS ARE YES:
+[ ] Vercel /health says version 1.7.0 and launchReadiness.ready=true
+[ ] Supabase schema.sql applied and persistence.persistent=true
+[ ] AUTH_SECRET is 32+ random characters and AUTH_REQUIRED=true
+[ ] Apple IAP server credentials configured on Vercel
+[ ] SOCIAL_IAP_MODE=live and APPLE_IAP_ENV=auto
+[ ] All 4 consumable chip products created in App Store Connect
+[ ] VIP subscription group/product created
+[ ] Purchases tested in TestFlight and chips arrive exactly once
+[ ] Restore Purchases tested for VIP
+[ ] Account deletion tested and creates a fresh profile
+[ ] Privacy URL opens publicly
+[ ] Support URL opens publicly and can create a ticket
+[ ] Terms URL opens publicly
+[ ] Two-device multiplayer test completed
+[ ] Notification/background/resume test completed
+[ ] New Round / Switch Table / Exit tested
+[ ] Tip Dealer tested
+[ ] Real iPhone screenshots uploaded (do not use fake/mock screenshots)
+[ ] App Privacy questionnaire completed
+[ ] Age Rating questionnaire completed with simulated gambling accurately declared
+[ ] App Review notes pasted
+[ ] Build 18 selected
+[ ] App + first IAPs + VIP subscription group added to review submission

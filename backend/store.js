@@ -8,6 +8,7 @@ const memPayments = new Map();
 const memRevenueRefs = new Set();
 const memHands = new Set();
 const memAudit = [];
+const memSupport = [];
 
 function supabaseReady() {
   return Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
@@ -395,4 +396,18 @@ export async function audit({ actorUserId = null, eventType, referenceId = null,
     return;
   }
   await sb('audit_logs', { method: 'POST', body: [row] });
+}
+
+
+export async function createSupportTicket({ userId = null, email = '', message }) {
+  const cleanEmail=String(email||'').trim().toLowerCase().slice(0,254); const cleanMessage=String(message||'').trim().slice(0,1200);
+  if(cleanMessage.length<10) throw new Error('Support message is too short');
+  const row={id:randomUUID(),user_id:userId||null,email:cleanEmail||null,message:cleanMessage,status:'open',created_at:new Date().toISOString()};
+  if(!supabaseReady()){memSupport.push(row);if(memSupport.length>1000)memSupport.shift();return row;}
+  const rows=await sb('support_tickets',{method:'POST',prefer:'return=representation',body:[row]}); return rows?.[0]||row;
+}
+export async function deleteUserAccount({ userId, externalPlayerId }) {
+  if(!userId) throw new Error('userId required');
+  if(!supabaseReady()){memWallets.delete(String(userId));if(externalPlayerId)memUsers.delete(String(externalPlayerId));return {ok:true};}
+  await sb(`users?id=eq.${encodeURIComponent(userId)}`,{method:'DELETE'}); return {ok:true};
 }

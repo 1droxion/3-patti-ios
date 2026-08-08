@@ -48,7 +48,7 @@ Future<void> main() async {
 }
 
 class ThreePattiApp extends StatefulWidget {
-  final String playerId;
+  String playerId;
   final String displayName;
   final int avatarIndex;
 
@@ -96,12 +96,12 @@ class _ThreePattiAppState extends State<ThreePattiApp> {
 class AppSession extends ChangeNotifier {
   String displayName;
   int walletChips = 10000;
-  int navPage = 0; // 0 home, 1 store, 2 history, 3 profile, 4 chips, 6 settings, 7 support, 8 rules
+  int navPage = 0; // 0 home, 1 store, 2 history, 3 profile, 4 chips, 6 settings, 7 support, 8 rules, 9 privacy, 10 terms
   bool soundEnabled = true;
   bool musicEnabled = true;
   bool vipActive = false;
   int avatarIndex;
-  final String playerId;
+  String playerId;
   final List<GameHistoryItem> history = [];
 
   AppSession({required this.playerId, this.displayName = 'Player', this.avatarIndex = 1});
@@ -159,19 +159,11 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void resetAccount() {
-    displayName = 'Player';
-    walletChips = 10000;
-    history.clear();
-    soundEnabled = true;
-    musicEnabled = true;
-    vipActive = false;
-    avatarIndex = 1;
-    navPage = 0;
-    unawaited(SharedPreferences.getInstance().then((prefs) async {
-      await prefs.setString('three_patti_display_name', 'Player');
-      await prefs.setInt('three_patti_avatar', 1);
-    }));
+  Future<void> resetAccountIdentity() async {
+    displayName = 'Player'; walletChips = 0; history.clear(); soundEnabled = true; musicEnabled = true; vipActive = false; avatarIndex = 1; navPage = 0;
+    playerId = 'p-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(99999)}';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('three_patti_player_id', playerId); await prefs.setString('three_patti_display_name', 'Player'); await prefs.setInt('three_patti_avatar', 1);
     notifyListeners();
   }
 }
@@ -224,6 +216,8 @@ class _AppShellState extends State<AppShell> {
         6 => SettingsView(session: widget.session),
         7 => SupportView(session: widget.session),
         8 => RulesView(session: widget.session),
+        9 => PrivacyView(session: widget.session),
+        10 => TermsView(session: widget.session),
         _ => LobbyView(session: widget.session),
       };
 
@@ -1320,11 +1314,13 @@ class AppMenu extends StatelessWidget {
                     _MenuTile(icon: Icons.paid_rounded, label: 'Social Chips', selected: activePage == 4, onTap: () => _select(context, 4)),
                     _MenuTile(icon: Icons.settings_rounded, label: 'Settings', selected: activePage == 6, onTap: () => _select(context, 6)),
                     _MenuTile(icon: Icons.support_agent_rounded, label: 'Support', selected: activePage == 7, onTap: () => _select(context, 7)),
-                    _MenuTile(icon: Icons.gavel_rounded, label: 'Rules & fees', selected: activePage == 8, onTap: () => _select(context, 8)),
+                    _MenuTile(icon: Icons.gavel_rounded, label: 'Rules & Fair Play', selected: activePage == 8, onTap: () => _select(context, 8)),
+                    _MenuTile(icon: Icons.privacy_tip_rounded, label: 'Privacy', selected: activePage == 9, onTap: () => _select(context, 9)),
+                    _MenuTile(icon: Icons.description_rounded, label: 'Terms', selected: activePage == 10, onTap: () => _select(context, 10)),
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.6', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.7', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1389,7 +1385,7 @@ const _socialOffers = <_SocialOffer>[
   _SocialOffer('com.droxion.threepatti.chips150k', '150K CHIPS', 'Best for regular play', Icons.stars_rounded),
   _SocialOffer('com.droxion.threepatti.chips400k', '400K CHIPS', 'Big social chip pack', Icons.local_fire_department_rounded),
   _SocialOffer('com.droxion.threepatti.chips1m', '1M CHIPS', 'Mega social chip pack', Icons.diamond_rounded),
-  _SocialOffer('com.droxion.threepatti.vip.monthly', 'VIP MONTHLY', 'VIP badge + premium status', Icons.workspace_premium_rounded, vip: true),
+  _SocialOffer('com.droxion.threepatti.vip.monthly', 'VIP MONTHLY', 'Monthly VIP badge + premium status', Icons.workspace_premium_rounded, vip: true),
 ];
 
 class StoreView extends StatefulWidget {
@@ -1435,7 +1431,7 @@ class _StoreViewState extends State<StoreView> {
         } else if (products.isEmpty) {
           message = 'Create the 5 products in App Store Connect to activate purchases.';
         } else {
-          message = 'SOCIAL CHIPS • NO CASH VALUE • NO WITHDRAWAL';
+          message = 'SOCIAL CHIPS • ENTERTAINMENT ONLY • NO CASH VALUE';
         }
       } else {
         message = 'App Store purchases are unavailable on this device.';
@@ -1478,17 +1474,15 @@ class _StoreViewState extends State<StoreView> {
       } else if (purchase.status == PurchaseStatus.canceled) {
         if (mounted) setState(() => message = 'Purchase canceled.');
       } else if (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) {
-        await _claimPurchase(purchase);
-      }
-      if (purchase.pendingCompletePurchase) {
-        await _iap.completePurchase(purchase);
+        final delivered = await _claimPurchase(purchase);
+        if (delivered && purchase.pendingCompletePurchase) await _iap.completePurchase(purchase);
       }
     }
   }
 
-  Future<void> _claimPurchase(PurchaseDetails purchase) async {
+  Future<bool> _claimPurchase(PurchaseDetails purchase) async {
     final purchaseId = purchase.purchaseID ?? '${purchase.productID}:${purchase.transactionDate ?? DateTime.now().millisecondsSinceEpoch}';
-    if (!claiming.add(purchaseId)) return;
+    if (!claiming.add(purchaseId)) return false;
     try {
       final result = await Api.post('/social/iap/claim', {
         'playerId': widget.session.playerId,
@@ -1502,18 +1496,12 @@ class _StoreViewState extends State<StoreView> {
       if (chips is int) widget.session.updateWallet(chips);
       widget.session.setVipActive(result['vipActive'] == true);
       HapticFeedback.mediumImpact();
-      if (mounted) {
-        setState(() {
-          message = result['idempotent'] == true
-              ? 'Purchase already delivered.'
-              : '${result['message'] ?? 'Purchase delivered.'}';
-        });
-      }
+      if (mounted) setState(() { message = result['idempotent'] == true ? 'Purchase already delivered.' : '${result['message'] ?? 'Purchase delivered.'}'; });
+      return true;
     } catch (e) {
-      if (mounted) setState(() => message = 'Purchase verification pending: $e');
-    } finally {
-      claiming.remove(purchaseId);
-    }
+      if (mounted) setState(() => message = 'Purchase not delivered yet. We will retry verification: $e');
+      return false;
+    } finally { claiming.remove(purchaseId); }
   }
 
   @override
@@ -1600,6 +1588,8 @@ class _StoreViewState extends State<StoreView> {
           Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9.5, color: Colors.white54, fontWeight: FontWeight.w700)),
           const SizedBox(height: 3),
           const Text('Purchased chips are virtual entertainment credits only. They cannot be sold, transferred, redeemed, or withdrawn for money.', textAlign: TextAlign.center, style: TextStyle(fontSize: 8.5, color: Colors.white38)),
+          const SizedBox(height: 3),
+          const Text('VIP Monthly is an auto-renewable subscription billed through your Apple ID. It renews until canceled in Apple subscription settings. VIP does not affect card odds or winning chances.', textAlign: TextAlign.center, style: TextStyle(fontSize: 8.2, color: Colors.white38)),
         ],
       ),
     );
@@ -1784,228 +1774,6 @@ class ProfileView extends StatelessWidget {
   }
 }
 
-class KycScreen extends StatefulWidget {
-  final AppSession session;
-  const KycScreen({super.key, required this.session});
-
-  @override
-  State<KycScreen> createState() => _KycScreenState();
-}
-
-class _KycScreenState extends State<KycScreen> {
-  final legalName = TextEditingController();
-  final email = TextEditingController();
-  final phone = TextEditingController();
-  final dob = TextEditingController();
-  final address = TextEditingController();
-  final taxId = TextEditingController();
-  final govId = TextEditingController();
-  String taxType = 'ssn';
-  String govType = 'license';
-  bool age21 = false;
-  bool loading = true;
-  bool saving = false;
-  String status = 'UNVERIFIED';
-  String message = 'Complete identity details to prepare Cash Mode verification.';
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    legalName.dispose(); email.dispose(); phone.dispose(); dob.dispose(); address.dispose(); taxId.dispose(); govId.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      final data = await Api.get('/kyc/status?playerId=${Uri.encodeQueryComponent(widget.session.playerId)}');
-      final p = data['profile'];
-      final v = data['verification'];
-      if (p is Map) {
-        legalName.text = '${p['legalName'] ?? ''}';
-        email.text = '${p['email'] ?? ''}';
-        phone.text = '${p['phone'] ?? ''}';
-        dob.text = '${p['dob'] ?? ''}';
-        address.text = '${p['homeAddress'] ?? ''}';
-        taxType = '${p['taxIdType'] ?? ''}' == 'tin' ? 'tin' : 'ssn';
-        govType = '${p['governmentIdType'] ?? ''}' == 'passport' ? 'passport' : 'license';
-        age21 = p['ageDeclared21'] == true;
-      }
-      if (v is Map) status = '${v['kycStatus'] ?? 'unverified'}'.toUpperCase();
-    } catch (e) {
-      message = 'Could not load verification status: $e';
-    }
-    if (mounted) setState(() => loading = false);
-  }
-
-  Future<void> _save() async {
-    if (saving) return;
-    setState(() { saving = true; message = 'Submitting identity details…'; });
-    try {
-      final data = await Api.post('/kyc/profile', {
-        'playerId': widget.session.playerId,
-        'legalName': legalName.text,
-        'email': email.text,
-        'phone': phone.text,
-        'dob': dob.text,
-        'homeAddress': address.text,
-        'taxIdType': taxType,
-        'taxId': taxId.text,
-        'governmentIdType': govType,
-        'governmentId': govId.text,
-        'ageDeclared21': age21,
-      });
-      status = '${data['status'] ?? 'submitted'}'.toUpperCase();
-      message = '${data['message'] ?? 'Submitted.'}';
-      taxId.clear();
-      govId.clear();
-    } catch (e) {
-      message = 'Verification submission failed: $e';
-    }
-    if (mounted) setState(() => saving = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: ink,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF050B08),
-        title: const Text('VERIFY IDENTITY / 21+', style: TextStyle(color: gold, fontWeight: FontWeight.w900)),
-      ),
-      body: CasinoBackdrop(
-        child: SafeArea(
-          child: loading
-              ? const Center(child: CircularProgressIndicator())
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(18),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 860),
-                      child: Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: _panelDecoration(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(children: [
-                              const Icon(Icons.verified_user_rounded, color: gold, size: 30),
-                              const SizedBox(width: 10),
-                              Expanded(child: Text('STATUS: $status', style: const TextStyle(fontSize: 18, color: Color(0xFFFFE0A0), fontWeight: FontWeight.w900))),
-                            ]),
-                            const SizedBox(height: 6),
-                            const Text('No selfie or video in this flow. SSN/TIN is optional at initial submission. An approved cash-gaming operator/KYC provider may still require additional information before real-money play.', style: TextStyle(fontSize: 10.5, color: Colors.white60)),
-                            const SizedBox(height: 14),
-                            Row(children: [
-                              Expanded(child: TextField(controller: legalName, decoration: const InputDecoration(labelText: 'Full legal name', border: OutlineInputBorder()))),
-                              const SizedBox(width: 10),
-                              Expanded(child: TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()))),
-                            ]),
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              Expanded(child: TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile number', border: OutlineInputBorder()))),
-                              const SizedBox(width: 10),
-                              Expanded(child: TextField(controller: dob, decoration: const InputDecoration(labelText: 'Date of birth', hintText: 'YYYY-MM-DD', border: OutlineInputBorder()))),
-                            ]),
-                            const SizedBox(height: 10),
-                            TextField(controller: address, decoration: const InputDecoration(labelText: 'Home address', border: OutlineInputBorder())),
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              SizedBox(
-                                width: 150,
-                                child: DropdownButtonFormField<String>(
-                                  value: taxType,
-                                  decoration: const InputDecoration(labelText: 'Optional tax ID', border: OutlineInputBorder()),
-                                  items: const [DropdownMenuItem(value: 'ssn', child: Text('SSN')), DropdownMenuItem(value: 'tin', child: Text('TIN'))],
-                                  onChanged: (v) => setState(() => taxType = v ?? 'ssn'),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(child: TextField(controller: taxId, obscureText: true, decoration: const InputDecoration(labelText: 'SSN/TIN — optional now', hintText: 'Not stored in raw form', border: OutlineInputBorder()))),
-                            ]),
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              SizedBox(
-                                width: 190,
-                                child: DropdownButtonFormField<String>(
-                                  value: govType,
-                                  decoration: const InputDecoration(labelText: 'Government ID', border: OutlineInputBorder()),
-                                  items: const [DropdownMenuItem(value: 'license', child: Text("Driver's license")), DropdownMenuItem(value: 'passport', child: Text('Passport'))],
-                                  onChanged: (v) => setState(() => govType = v ?? 'license'),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(child: TextField(controller: govId, obscureText: true, decoration: const InputDecoration(labelText: 'License / passport number', hintText: 'Not stored in raw form', border: OutlineInputBorder()))),
-                            ]),
-                            const SizedBox(height: 8),
-                            CheckboxListTile(
-                              contentPadding: EdgeInsets.zero,
-                              value: age21,
-                              onChanged: (v) => setState(() => age21 = v == true),
-                              activeColor: gold,
-                              title: const Text('I confirm I am 21 or older', style: TextStyle(fontWeight: FontWeight.w900)),
-                              subtitle: const Text('Date of birth must also show age 21+.', style: TextStyle(fontSize: 10, color: Colors.white54)),
-                            ),
-                            const SizedBox(height: 6),
-                            FilledButton.icon(
-                              onPressed: saving ? null : _save,
-                              icon: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.lock_rounded),
-                              label: const Text('SUBMIT FOR VERIFICATION'),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10.5, color: Colors.white60)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-        ),
-      ),
-    );
-  }
-}
-
-class PageFrame extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final Widget child;
-
-  const PageFrame({super.key, required this.title, required this.subtitle, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Container(width: 4, height: 28, decoration: BoxDecoration(color: gold, borderRadius: BorderRadius.circular(8))),
-              const SizedBox(width: 9),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontSize: 20, color: Color(0xFFFFE2A1), fontWeight: FontWeight.w900, letterSpacing: .8)),
-                  Text(subtitle, style: const TextStyle(fontSize: 9.5, color: Color(0x75FFFFFF))),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Expanded(child: child),
-        ],
-      ),
-    );
-  }
-}
-
-
 class WalletView extends StatelessWidget {
   final AppSession session;
   const WalletView({super.key, required this.session});
@@ -2052,7 +1820,7 @@ class WalletView extends StatelessWidget {
               ),
               const SizedBox(height: 11),
               const Text(
-                'Social chips can only be used inside 3 Patti Social. They cannot be withdrawn, redeemed for USD, transferred to PayPal/bank, or exchanged for anything of value.',
+                'Social chips are virtual entertainment credits used only inside 3 Patti Social. They cannot be withdrawn, sold, transferred, redeemed for money, prizes, or anything of value.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 10.5, color: Colors.white54, height: 1.4),
               ),
@@ -2064,337 +1832,19 @@ class WalletView extends StatelessWidget {
   }
 }
 
-class WithdrawView extends StatefulWidget {
-  final AppSession session;
-  const WithdrawView({super.key, required this.session});
-
-  @override
-  State<WithdrawView> createState() => _WithdrawViewState();
-}
-
-class _WithdrawViewState extends State<WithdrawView> {
-  final destinationController = TextEditingController();
-  final chipsController = TextEditingController();
-  bool sending = false;
-  bool cashModeEnabled = false;
-  String provider = 'paypal';
-  String? requestId;
-  String? message;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadConfig();
-  }
-
-  Future<void> _loadConfig() async {
-    try {
-      final result = await Api.get('/payments-config');
-      if (mounted) setState(() => cashModeEnabled = result['cashModeEnabled'] == true);
-    } catch (_) {}
-  }
-
-  @override
-  void dispose() {
-    destinationController.dispose();
-    chipsController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submitSandbox() async {
-    final destination = destinationController.text.trim();
-    final chips = int.tryParse(chipsController.text.replaceAll(',', '').trim()) ?? 0;
-    final destinationOk = provider == 'paypal' ? destination.contains('@') : destination.length >= 4;
-    if (!destinationOk || chips <= 0 || chips > widget.session.walletChips) {
-      setState(() => message = provider == 'paypal'
-          ? 'Enter a valid PayPal email and chip amount within your balance.'
-          : 'Enter bank account last 4 digits/reference and a chip amount within your balance.');
-      return;
-    }
-    setState(() {
-      sending = true;
-      message = null;
-      requestId = null;
-    });
-    try {
-      final result = await Api.post('/withdraw-sandbox', {
-        'playerId': widget.session.playerId,
-        'provider': provider,
-        'destination': destination,
-        'chips': chips,
-      });
-      if (!mounted) return;
-      final walletChips = result['walletChips'];
-      if (walletChips is int) widget.session.updateWallet(walletChips);
-      setState(() {
-        requestId = '${result['requestId']}';
-        message = '${_providerLabel(provider)} sandbox withdrawal created. No real payout was sent.';
-      });
-      HapticFeedback.mediumImpact();
-    } catch (e) {
-      if (mounted) setState(() => message = '$e');
-    } finally {
-      if (mounted) setState(() => sending = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final usdPreview = widget.session.walletChips / 100.0;
-    return PageFrame(
-      title: 'WITHDRAW',
-      subtitle: cashModeEnabled ? 'Approved payout mode' : 'PayPal + bank payout rails — sandbox',
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 780),
-          child: SingleChildScrollView(
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: _panelDecoration(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(child: _PayoutSelector(selected: provider == 'paypal', icon: Icons.account_balance_wallet_rounded, title: 'PAYPAL', onTap: () => setState(() { provider = 'paypal'; destinationController.clear(); message = null; }))),
-                      const SizedBox(width: 10),
-                      Expanded(child: _PayoutSelector(selected: provider == 'bank', icon: Icons.account_balance_rounded, title: 'BANK / ACH', onTap: () => setState(() { provider = 'bank'; destinationController.clear(); message = null; }))),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text('${_money(widget.session.walletChips)} CHIPS AVAILABLE', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
-                  Text('Sandbox preview • 100 chips = \$1.00 • \$${usdPreview.toStringAsFixed(2)} shown balance', style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: destinationController,
-                    keyboardType: provider == 'paypal' ? TextInputType.emailAddress : TextInputType.text,
-                    autocorrect: false,
-                    decoration: InputDecoration(
-                      labelText: provider == 'paypal' ? 'PayPal email' : 'Bank payout reference / last 4',
-                      hintText: provider == 'paypal' ? 'name@example.com' : '1234',
-                      prefixIcon: Icon(provider == 'paypal' ? Icons.alternate_email_rounded : Icons.account_balance_rounded),
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: chipsController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'Chips to withdraw', hintText: '1000', prefixIcon: Icon(Icons.stars_rounded), border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: sending ? null : _submitSandbox,
-                    icon: sending ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.payments_rounded),
-                    label: Text(sending ? 'CREATING REQUEST...' : 'REQUEST ${_providerLabel(provider)} WITHDRAWAL — SANDBOX'),
-                  ),
-                  if (message != null) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(11),
-                      decoration: BoxDecoration(color: requestId == null ? const Color(0xFF351C15) : const Color(0xFF0F3020), borderRadius: BorderRadius.circular(12), border: Border.all(color: requestId == null ? Colors.orangeAccent : const Color(0xFF59E781))),
-                      child: Text(requestId == null ? message! : '$message\nRequest: $requestId', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700)),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  const _PrototypeNotice(),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PayoutSelector extends StatelessWidget {
-  final bool selected;
-  final IconData icon;
-  final String title;
-  final VoidCallback onTap;
-  const _PayoutSelector({required this.selected, required this.icon, required this.title, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF123A23) : const Color(0xFF0A110E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: selected ? gold : const Color(0xFF3A3018)),
-        ),
-        child: Row(children: [Icon(icon, color: selected ? gold : Colors.white60), const SizedBox(width: 8), Text(title, style: TextStyle(fontWeight: FontWeight.w900, color: selected ? const Color(0xFFFFE6A4) : Colors.white70))]),
-      ),
-    );
-  }
-}
-
-String _providerLabel(String provider) => switch (provider) {
-      'apple_pay' => 'APPLE PAY',
-      'cash_app' => 'CASH APP PAY',
-      'card' => 'CARD',
-      'bank' => 'BANK / ACH',
-      _ => 'PAYPAL',
-    };
-
 class SettingsView extends StatelessWidget {
-  final AppSession session;
-  const SettingsView({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: session,
-      builder: (context, _) => PageFrame(
-        title: 'SETTINGS',
-        subtitle: 'Game preferences and account controls',
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: _panelDecoration(),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SwitchListTile(
-                    value: session.soundEnabled,
-                    onChanged: session.setSoundEnabled,
-                    title: const Text('Card & chip sounds'),
-                    subtitle: const Text('Deal, card and chip effects', style: TextStyle(fontSize: 10, color: Colors.white54)),
-                    secondary: const Icon(Icons.volume_up_rounded, color: gold),
-                  ),
-                  SwitchListTile(
-                    value: session.musicEnabled,
-                    onChanged: session.setMusicEnabled,
-                    title: const Text('Win music'),
-                    subtitle: const Text('Winner celebration jingle', style: TextStyle(fontSize: 10, color: Colors.white54)),
-                    secondary: const Icon(Icons.music_note_rounded, color: gold),
-                  ),
-                  const Divider(height: 22),
-                  const Text('DANGER ZONE', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 10)),
-                  const SizedBox(height: 7),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent)),
-                    onPressed: () => _confirmDelete(context),
-                    icon: const Icon(Icons.delete_forever_rounded),
-                    label: const Text('DELETE ACCOUNT'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmDelete(BuildContext context) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Account?'),
-        content: const Text('Are you sure? This prototype will clear your local profile name and game history.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700), onPressed: () => Navigator.pop(context, true), child: const Text('DELETE')),
-        ],
-      ),
-    );
-    if (ok == true) session.resetAccount();
-  }
+  final AppSession session; const SettingsView({super.key, required this.session});
+  @override Widget build(BuildContext context)=>AnimatedBuilder(animation:session,builder:(context,_)=>PageFrame(title:'SETTINGS',subtitle:'Game preferences and account controls',child:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:720),child:Container(padding:const EdgeInsets.all(14),decoration:_panelDecoration(),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[SwitchListTile(value:session.soundEnabled,onChanged:session.setSoundEnabled,title:const Text('Card & chip sounds'),secondary:const Icon(Icons.volume_up_rounded,color:gold)),SwitchListTile(value:session.musicEnabled,onChanged:session.setMusicEnabled,title:const Text('Win music'),secondary:const Icon(Icons.music_note_rounded,color:gold)),const Divider(height:22),Row(children:[Expanded(child:OutlinedButton.icon(onPressed:()=>session.setPage(9),icon:const Icon(Icons.privacy_tip_rounded),label:const Text('PRIVACY'))),const SizedBox(width:10),Expanded(child:OutlinedButton.icon(onPressed:()=>session.setPage(10),icon:const Icon(Icons.description_rounded),label:const Text('TERMS')))]),const Divider(height:22),const Text('ACCOUNT',style:TextStyle(color:Colors.redAccent,fontWeight:FontWeight.w900,fontSize:10)),const SizedBox(height:7),OutlinedButton.icon(style:OutlinedButton.styleFrom(foregroundColor:Colors.redAccent,side:const BorderSide(color:Colors.redAccent)),onPressed:()=>_confirmDelete(context),icon:const Icon(Icons.delete_forever_rounded),label:const Text('DELETE ACCOUNT & DATA')),const SizedBox(height:6),const Text('Deletes your active 3 Patti Social account from our server and resets this device to a new social profile. Certain anonymized integrity records may be retained.',textAlign:TextAlign.center,style:TextStyle(fontSize:8.5,color:Colors.white38))]))))));
+  Future<void> _confirmDelete(BuildContext context) async{final ok=await showDialog<bool>(context:context,builder:(context)=>AlertDialog(title:const Text('Delete Account?'),content:const Text('This permanently deletes your current 3 Patti Social profile, server social-chip balance, and game entitlement record. This cannot be undone. Apple purchase history remains with your Apple ID.'),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('CANCEL')),FilledButton(style:FilledButton.styleFrom(backgroundColor:Colors.red),onPressed:()=>Navigator.pop(context,true),child:const Text('DELETE'))]));if(ok!=true||!context.mounted)return;showDialog<void>(context:context,barrierDismissible:false,builder:(_)=>const Center(child:CircularProgressIndicator()));try{await Api.post('/account/delete',{'playerId':session.playerId});Api.resetSession();await session.resetAccountIdentity();await Api.ensureSession();if(context.mounted){Navigator.of(context,rootNavigator:true).pop();ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Account deleted. A fresh social profile has been created.')));}}catch(e){if(context.mounted){Navigator.of(context,rootNavigator:true).pop();ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not delete account: $e')));}}}
 }
 
-class RulesView extends StatelessWidget {
-  final AppSession session;
-  const RulesView({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    return PageFrame(
-      title: 'RULES & FEES',
-      subtitle: 'Clear rules before you play',
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: SingleChildScrollView(
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _RuleLine('3 Patti Social uses virtual entertainment chips only. Chips have no cash value.'),
-                _RuleLine('Purchased chips cannot be withdrawn, sold, transferred, or redeemed for money or prizes.'),
-                _RuleLine('Boot starts at 10 chips.'),
-                _RuleLine('Table limits: 2-5 players = 5K, 6-8 players = 20K, 9-10 players = 50K.'),
-                _RuleLine('Players compete against other players; the server deals the cards.'),
-                _RuleLine('A 5% virtual-chip table fee is deducted from a settled pot to help balance the social-chip economy.'),
-                _RuleLine('VIP is a digital membership benefit and does not increase the odds of winning cards.'),
-                SizedBox(height: 12),
-                Text(
-                  'This release is social entertainment only. There are no real-money deposits, cash winnings, PayPal withdrawals, bank withdrawals, or cash conversion.',
-                  style: TextStyle(color: Colors.amberAccent, height: 1.35),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RuleLine extends StatelessWidget {
-  final String text;
-  const _RuleLine(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Icon(Icons.check_circle_rounded, color: greenAccent, size: 19),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text)),
-      ]),
-    );
-  }
-}
-
-class SupportView extends StatelessWidget {
-  final AppSession session;
-  const SupportView({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    return PageFrame(
-      title: 'SUPPORT',
-      subtitle: 'Help and player support',
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: _panelDecoration(),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [Icon(Icons.support_agent_rounded, color: gold, size: 34), SizedBox(width: 10), Text('Support center', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900))]),
-                SizedBox(height: 10),
-                Text('Add your real support email, FAQ, and ticket system before public launch.', style: TextStyle(color: Colors.white60)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+class RulesView extends StatelessWidget{final AppSession session;const RulesView({super.key,required this.session});@override Widget build(BuildContext context)=>const PageFrame(title:'RULES & FAIR PLAY',subtitle:'Social Teen Patti — virtual chips only',child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[_RuleLine('3 Patti Social is a social entertainment card game using virtual chips only.'),_RuleLine('Virtual chips have no cash value and cannot be withdrawn, sold, transferred, redeemed for money, prizes, or anything of value.'),_RuleLine('Boot starts at 10 chips. Table limits: 2–5 players = 5K, 6–8 players = 20K, 9–10 players = 50K.'),_RuleLine('The game server deals and evaluates cards. Players cannot choose or change cards.'),_RuleLine('A 5% virtual-chip table fee may be removed from a settled pot as part of the social-chip economy. It is not money.'),_RuleLine('Dealer tips use virtual chips only and have no monetary value.'),_RuleLine('VIP and chip purchases do not improve card odds or winning chances.'),SizedBox(height:12),Text('NO REAL-MONEY GAMBLING • NO CASH WINNINGS • NO WITHDRAWALS',style:TextStyle(color:Colors.amberAccent,fontWeight:FontWeight.w900))])));}
+class _RuleLine extends StatelessWidget{final String text;const _RuleLine(this.text);@override Widget build(BuildContext context)=>Padding(padding:const EdgeInsets.only(bottom:8),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[const Icon(Icons.check_circle_rounded,color:greenAccent,size:19),const SizedBox(width:8),Expanded(child:Text(text))]));}
+class SupportView extends StatefulWidget{final AppSession session;const SupportView({super.key,required this.session});@override State<SupportView> createState()=>_SupportViewState();}
+class _SupportViewState extends State<SupportView>{final email=TextEditingController();final message=TextEditingController();bool sending=false;String? result;@override void dispose(){email.dispose();message.dispose();super.dispose();}Future<void> _send()async{final m=message.text.trim();if(m.length<10){setState(()=>result='Tell us what happened in at least 10 characters.');return;}setState((){sending=true;result=null;});try{final d=await Api.post('/social/support-ticket',{'playerId':widget.session.playerId,'email':email.text.trim(),'message':m});if(!mounted)return;setState((){result='Ticket ${d['ticketId']} created.';message.clear();});}catch(e){if(mounted)setState(()=>result='Could not send support request: $e');}finally{if(mounted)setState(()=>sending=false);}}@override Widget build(BuildContext context)=>PageFrame(title:'SUPPORT',subtitle:'Send a support request from inside the game',child:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:720),child:SingleChildScrollView(child:Container(padding:const EdgeInsets.all(18),decoration:_panelDecoration(),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[const Row(children:[Icon(Icons.support_agent_rounded,color:gold,size:34),SizedBox(width:10),Expanded(child:Text('Player Support',style:TextStyle(fontSize:21,fontWeight:FontWeight.w900)))]),const SizedBox(height:12),TextField(controller:email,keyboardType:TextInputType.emailAddress,decoration:const InputDecoration(labelText:'Email for reply (optional)',border:OutlineInputBorder())),const SizedBox(height:10),TextField(controller:message,minLines:3,maxLines:6,maxLength:1200,decoration:const InputDecoration(labelText:'How can we help?',border:OutlineInputBorder())),FilledButton.icon(onPressed:sending?null:_send,icon:const Icon(Icons.send_rounded),label:Text(sending?'SENDING…':'SEND SUPPORT REQUEST')),if(result!=null)...[const SizedBox(height:9),Text(result!,textAlign:TextAlign.center)],const SizedBox(height:8),const Text('Never send passwords, full payment-card numbers, or government ID numbers.',textAlign:TextAlign.center,style:TextStyle(fontSize:8.5,color:Colors.white38))]))))));}
+class PrivacyView extends StatelessWidget{final AppSession session;const PrivacyView({super.key,required this.session});@override Widget build(BuildContext context)=>const PageFrame(title:'PRIVACY',subtitle:'3 Patti Social privacy summary',child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[_LegalHeading('What we collect'),Text('We may process a pseudonymous player ID, display name, selected avatar, social-chip balance, gameplay and table activity, support messages, app-purchase transaction identifiers, and technical/network information needed to operate and secure the service.'),_LegalHeading('Social-only data'),Text('This public social release does not collect government-ID numbers, tax identifiers, bank-account details, cash deposits, or cash-withdrawal information.'),_LegalHeading('Purchases'),Text('Virtual chips and VIP are purchased through Apple In-App Purchase. We receive transaction information needed to validate and deliver digital items; we do not receive your full payment-card number from Apple.'),_LegalHeading('Deletion'),Text('You can delete your account from Settings. Limited anonymized integrity, fraud-prevention, purchase, or security records may be retained when reasonably necessary.'),_LegalHeading('Public policy'),Text('https://3-patti-ios.vercel.app/privacy')])));}
+class TermsView extends StatelessWidget{final AppSession session;const TermsView({super.key,required this.session});@override Widget build(BuildContext context)=>const PageFrame(title:'TERMS',subtitle:'Social-game terms',child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[_LegalHeading('Social entertainment only'),Text('Virtual chips are entertainment credits only and cannot be redeemed for cash, prizes, or anything of value.'),_LegalHeading('Fair play'),Text('Do not exploit bugs, automate gameplay, collude, impersonate another player, manipulate network traffic, or attempt to alter balances, cards, or game results.'),_LegalHeading('Virtual purchases'),Text('Chip packs are consumable digital items. VIP Monthly is an auto-renewable subscription billed by Apple and can be managed or canceled through Apple subscription settings. Purchases do not improve card odds.'),_LegalHeading('No real-money wagering'),Text('This public social release does not accept cash wagers, award cash winnings, or provide cash withdrawals.'),_LegalHeading('Public terms'),Text('https://3-patti-ios.vercel.app/terms')])));}
+class _LegalHeading extends StatelessWidget{final String text;const _LegalHeading(this.text);@override Widget build(BuildContext context)=>Padding(padding:const EdgeInsets.only(top:14,bottom:5),child:Text(text.toUpperCase(),style:const TextStyle(color:gold,fontWeight:FontWeight.w900,fontSize:11,letterSpacing:.7)));}
 
 class _MetricCard extends StatelessWidget {
   final String label;
@@ -2413,23 +1863,6 @@ class _MetricCard extends StatelessWidget {
         const SizedBox(height: 6),
         Text(value, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900)),
         Text(helper, style: const TextStyle(color: Colors.white54)),
-      ]),
-    );
-  }
-}
-
-class _PrototypeNotice extends StatelessWidget {
-  const _PrototypeNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: const Color(0xFF302511), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF805F1B))),
-      child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(Icons.info_outline_rounded, color: gold),
-        SizedBox(width: 10),
-        Expanded(child: Text('Payment, KYC, bank, and withdrawal processing are intentionally not connected in this prototype build.')),
       ]),
     );
   }
@@ -4877,6 +4310,8 @@ class Api {
   static void configureSession(AppSession session) {
     _session = session;
   }
+
+  static void resetSession() { _token = null; _bootstrapFuture = null; }
 
   static Future<void> ensureSession() async {
     if (_token != null || _session == null) return;

@@ -1,7 +1,7 @@
 name: three_patti_usa
 publish_to: 'none'
-description: 3 Patti Social premium full-screen iOS lobby and multiplayer prototype.
-version: 1.6.0+17
+description: 3 Patti Social - live multiplayer social Teen Patti with virtual chips only.
+version: 1.7.0+18
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

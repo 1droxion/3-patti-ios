@@ -1,5 +1,5 @@
 3 PATTI SOCIAL — FINAL APPLE IAP LAUNCH SETUP
-Version 1.8.1 / Build 21
+Version 1.8.2 / Build 22
 
 PUBLIC MONETIZATION
 - New user starter balance: 25,000 Social Chips
@@ -44,10 +44,17 @@ For live App Store purchase delivery, configure the Apple IAP server credentials
 Do not set SOCIAL_IAP_MODE=live until persistent storage and Apple server verification credentials are configured.
 
 FINAL TEST
-1. Install Build 21 in TestFlight.
+1. Install Build 22 in TestFlight.
 2. New account receives 25,000 chips.
 3. Open BUY CHIPS.
 4. All five App Store products load with Apple prices.
 5. Buy a sandbox chip pack.
 6. Confirm chips are credited once only.
 7. Restore VIP and confirm VIP status returns.
+
+REPEAT PURCHASES
+- All four chip packs are consumable IAPs.
+- The app does not impose a cumulative purchase count or chip purchase limit.
+- A player can buy the same chip pack again after each completed purchase.
+- Every Apple transaction is credited once using its unique transaction ID.
+- Apple may still apply its own payment/fraud/account/parental/regional controls.

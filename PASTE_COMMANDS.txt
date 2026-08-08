@@ -1,32 +1,15 @@
-# 3 Patti Social V1.7 Launch Candidate — Build 19
+# 3 Patti Social V1.8.2 — Build 22
 
-Public social-only App Store candidate.
-
-Changes:
-- Removes dormant KYC, PayPal, bank, deposit and withdrawal UI from the public Flutter binary.
-- Social chips only; no cash value or redemption.
-- Real server-side account deletion from Settings.
-- Working in-app support ticket form.
-- Public Privacy, Terms and Support pages hosted by the backend.
-- App Store IAP delivery now fails closed: StoreKit transactions are completed only after server delivery succeeds.
-- Live IAP requires persistent storage and Apple server verification.
-- Apple transaction verification automatically tries production then sandbox for App Review/TestFlight compatibility.
-- VIP uses Apple's verified subscription expiration when live.
-- Backend fails closed in public mode if Supabase/auth are not configured.
-- Version 1.7.1+18.
-
-## Install
 Upload this ZIP into the root of your existing repo and run:
 
-```bash
 cd /workspaces/3-patti-ios
-unzip -o three_patti_v17_app_store_launch.zip
-rm three_patti_v17_app_store_launch.zip
+unzip -o three_patti_v182_repeat_iap.zip
+rm three_patti_v182_repeat_iap.zip
 flutter pub get
 git add .
-git commit -m "V1.7 App Store social launch candidate"
+git commit -m "V1.8.2 repeat Apple IAP chip purchases"
 git push
-```
 
-Then configure Vercel using backend/.env.example and run backend/schema.sql in Supabase.
-See app_store_launch/ for App Store metadata, IAP IDs, privacy guidance, review notes, age-rating guidance and the final launch checklist.
+Then run Codemagic Build 22 and install it from TestFlight.
+
+IMPORTANT: The app code can allow repeated consumable purchases, but Apple will not return a product until the exact product ID is fully configured in App Store Connect.

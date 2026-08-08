@@ -1,4 +1,4 @@
-# 3 Patti Social — V1.8.1 Build 21
+# 3 Patti Social — V1.8.2 Build 22
 
 Final social-store launch package.
 

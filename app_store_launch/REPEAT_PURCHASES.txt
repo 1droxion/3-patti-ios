@@ -1,0 +1,9 @@
+3 Patti Social V1.8.2 — Repeat chip purchases
+
+Chip packs are CONSUMABLE Apple In-App Purchases.
+The app does not impose a cumulative purchase count or chip purchase limit.
+A player can complete a chip-pack purchase, then purchase the same pack again.
+Each successful Apple transaction has a unique transaction ID and is credited once by the backend.
+Apple may independently apply payment authorization, fraud prevention, purchase, account, parental, or regional restrictions. The app cannot and must not bypass those Apple controls.
+
+IMPORTANT: Code cannot activate products in App Store Connect. The exact product IDs must exist and be fully configured there before TestFlight/App Store can return them.

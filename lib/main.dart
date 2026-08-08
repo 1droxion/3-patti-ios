@@ -1500,7 +1500,7 @@ class _StoreViewState extends State<StoreView> {
         } else if (products.isEmpty) {
           message = 'Chip packs are ready in the app. Activate the 5 product IDs in App Store Connect to enable checkout.';
         } else {
-          message = 'SOCIAL CHIPS • ENTERTAINMENT ONLY • NO CASH VALUE';
+          message = 'Tap any chip pack to buy. Chip packs are consumable and can be purchased again after every completed purchase.';
         }
       } else {
         message = 'App Store purchases are unavailable on this device.';
@@ -1520,7 +1520,7 @@ class _StoreViewState extends State<StoreView> {
   Future<void> _buy(_SocialOffer offer) async {
     final product = products[offer.id];
     if (!storeAvailable || product == null) {
-      setState(() => message = 'This pack is not active in App Store Connect yet. Digital chips must use Apple In-App Purchase.');
+      setState(() => message = 'Apple has not returned this product yet. Finish this exact product ID in App Store Connect, then reopen the TestFlight app.');
       return;
     }
     HapticFeedback.selectionClick();
@@ -1565,7 +1565,10 @@ class _StoreViewState extends State<StoreView> {
       if (chips is int) widget.session.updateWallet(chips);
       widget.session.setVipActive(result['vipActive'] == true);
       HapticFeedback.mediumImpact();
-      if (mounted) setState(() { message = result['idempotent'] == true ? 'Purchase already delivered.' : '${result['message'] ?? 'Purchase delivered.'}'; });
+      if (mounted) setState(() {
+        final base = result['idempotent'] == true ? 'Purchase already delivered.' : '${result['message'] ?? 'Purchase delivered.'}';
+        message = purchase.productID.contains('.chips') ? '$base You can buy this chip pack again anytime.' : base;
+      });
       return true;
     } catch (e) {
       if (mounted) setState(() => message = 'Purchase not delivered yet. We will retry verification: $e');
@@ -1605,7 +1608,7 @@ class _StoreViewState extends State<StoreView> {
                 TextButton.icon(
                   onPressed: storeAvailable ? () => _iap.restorePurchases() : null,
                   icon: const Icon(Icons.restore_rounded, size: 17),
-                  label: const Text('RESTORE'),
+                  label: const Text('RESTORE VIP'),
                 ),
               ],
             ),
@@ -1646,10 +1649,15 @@ class _StoreViewState extends State<StoreView> {
                         Text(offer.subtitle, style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
                         const SizedBox(height: 8),
                         Text(product?.price ?? offer.launchPrice, style: TextStyle(fontSize: 11, color: product == null ? Colors.white70 : gold, fontWeight: FontWeight.w900)),
+                        const SizedBox(height: 2),
                         if (product == null)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Text('ACTIVATE IN APP STORE', style: TextStyle(fontSize: 7.5, color: Colors.orangeAccent, fontWeight: FontWeight.w900)),
+                          const Text('NOT READY IN APP STORE', style: TextStyle(fontSize: 7.5, color: Colors.orangeAccent, fontWeight: FontWeight.w900))
+                        else
+                          Text(
+                            offer.vip ? 'SUBSCRIBE ${product.price}' : 'BUY ${product.price} • BUY AGAIN ANYTIME',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 7.1, color: Color(0xFF88F7A4), fontWeight: FontWeight.w900),
                           ),
                       ],
                     ),
@@ -1661,7 +1669,7 @@ class _StoreViewState extends State<StoreView> {
           const SizedBox(height: 7),
           Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9.5, color: Colors.white54, fontWeight: FontWeight.w700)),
           const SizedBox(height: 3),
-          const Text('Purchased chips are virtual entertainment credits only. They cannot be sold, transferred, redeemed, or withdrawn for money.', textAlign: TextAlign.center, style: TextStyle(fontSize: 8.5, color: Colors.white38)),
+          const Text('Chip packs are consumable and may be purchased repeatedly. Our app does not impose a cumulative chip-purchase limit. Purchased chips are virtual entertainment credits only and cannot be sold, transferred, redeemed, or withdrawn for money.', textAlign: TextAlign.center, style: TextStyle(fontSize: 8.5, color: Colors.white38)),
           const SizedBox(height: 3),
           const Text('VIP Monthly is an auto-renewable subscription billed through your Apple ID. It renews until canceled in Apple subscription settings. VIP does not affect card odds or winning chances.', textAlign: TextAlign.center, style: TextStyle(fontSize: 8.2, color: Colors.white38)),
         ],

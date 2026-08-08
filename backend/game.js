@@ -686,7 +686,7 @@ export async function handle(req, res, forcedRoute = '') {
   try {
     if (req.method === 'GET' && (route === '' || route === 'health')) {
       return json(res, 200, {
-        ok: true, version: '1.8.1', productMode: 'social-only', virtualChipsCashValue: false, withdrawalsEnabled: false, cachedRooms: rooms.size,
+        ok: true, version: '1.8.2', productMode: 'social-only', virtualChipsCashValue: false, withdrawalsEnabled: false, cachedRooms: rooms.size,
         persistence: store.persistenceStatus(), security: securityStatus(), socialIapMode: socialIapMode(), appleIapVerificationConfigured: appleIapConfigReady(), launchReadiness: launchReadiness(),
       });
     }
@@ -742,6 +742,8 @@ export async function handle(req, res, forcedRoute = '') {
         vipActive: vipActive(user),
         vipUntil: user.vip_until || null,
         wallet: { chips: Number(wallet?.chip_balance || 0) },
+        repeatConsumablePurchasesAllowed: true,
+        appPurchaseLimit: null,
         products: Object.entries(SOCIAL_PRODUCTS).map(([id, v]) => ({ id, ...v })),
       });
     }

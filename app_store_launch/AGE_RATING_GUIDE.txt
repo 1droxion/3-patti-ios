@@ -1,4 +1,4 @@
 In App Store Connect Age Rating questionnaire, answer honestly for a Teen Patti social card game.
 The game continuously depicts simulated gambling/card wagering with virtual chips, so mark the simulated-gambling descriptor at the frequency that accurately reflects normal gameplay (expected: frequent/regular).
-There is NO real-money gambling in V1.8.1.
+There is NO real-money gambling in V1.8.2.
 Let App Store Connect calculate the final regional age rating.

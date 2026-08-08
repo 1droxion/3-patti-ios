@@ -1,4 +1,6 @@
-import { randomUUID, randomInt } from 'node:crypto';
+import { randomUUID, randomBytes, randomInt, createHash, createHmac } from 'node:crypto';
+import * as store from './store.js';
+import { issueSessionToken, requirePlayerAuth, securityStatus, clientFingerprint } from './security.js';
 
 export const rooms = new Map();
 const queues = new Map();
@@ -11,7 +13,7 @@ export function json(res, code, data) {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'content-type',
+    'access-control-allow-headers': 'content-type, authorization, x-idempotency-key',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
   });
   res.end(body);
@@ -49,16 +51,36 @@ function tableCapFor(playerCount) {
   return 50000;
 }
 
+function secureRandomIndex(seed, counterRef, upperExclusive) {
+  if (upperExclusive <= 1) return 0;
+  const limit = Math.floor(0x100000000 / upperExclusive) * upperExclusive;
+  while (true) {
+    const counter = Buffer.allocUnsafe(8);
+    counter.writeBigUInt64BE(BigInt(counterRef.value++));
+    const digest = createHmac('sha256', seed).update(counter).digest();
+    for (let offset = 0; offset <= digest.length - 4; offset += 4) {
+      const value = digest.readUInt32BE(offset);
+      if (value < limit) return value % upperExclusive;
+    }
+  }
+}
+
 function makeDeck() {
+  const seed = randomBytes(32);
+  const counterRef = { value: 0 };
   const cards = [];
   for (let suit = 0; suit < 4; suit++) {
     for (let rank = 2; rank <= 14; rank++) cards.push({ rank, suit });
   }
   for (let i = cards.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
+    const j = secureRandomIndex(seed, counterRef, i + 1);
     [cards[i], cards[j]] = [cards[j], cards[i]];
   }
-  return cards;
+  return {
+    cards,
+    seedHex: seed.toString('hex'),
+    commitment: createHash('sha256').update(seed).digest('hex'),
+  };
 }
 
 function handValue(cards) {
@@ -128,7 +150,12 @@ function advanceTurn(room) {
 }
 
 function startRound(room) {
-  const deck = makeDeck();
+  const secureDeck = makeDeck();
+  const deck = secureDeck.cards;
+  room.handId = randomUUID();
+  room.handCommitment = secureDeck.commitment;
+  room.handSeed = secureDeck.seedHex;
+  room.handReveal = null;
   room.round += 1;
   room.pot = 0;
   room.currentBet = 10;
@@ -163,6 +190,8 @@ function payWinner(room, winner, reason = '') {
   winner.chips += payout;
   room.lastFee = fee;
   room.lastPayout = payout;
+  room.handReveal = room.handSeed || null;
+  room.rakeReferenceId = room.handId ? `rake:${room.handId}` : `rake:${room.id}:${room.round}`;
   room.winnerId = winner.id;
   room.status = 'showdown';
   room.revealed = true;
@@ -233,6 +262,9 @@ function publicState(room, playerId) {
     currentBet: room.currentBet,
     cap: room.cap,
     feeRate: FEE_RATE,
+    handId: room.handId || null,
+    handCommitment: room.handCommitment || null,
+    handReveal: room.revealed ? (room.handReveal || null) : null,
     lastFee: room.lastFee || 0,
     lastPayout: room.lastPayout || 0,
     message: room.message,
@@ -277,69 +309,150 @@ function queueFor(n) {
   return queues.get(n);
 }
 
-function joinRoom({ playerId, name, avatar, playerCount, excludeRoomId = '' }) {
+async function getRoom(roomId) {
+  if (!roomId) return null;
+  const cached = rooms.get(String(roomId));
+  if (cached) return cached;
+  const loaded = await store.loadRoom(String(roomId));
+  if (loaded) rooms.set(loaded.id, loaded);
+  return loaded;
+}
+
+async function persistRoom(room) {
+  await store.saveRoom(room);
+  rooms.set(room.id, room);
+  return room;
+}
+
+async function persistFinancialEffects(room) {
+  if (room.status === 'showdown') {
+    if (room.lastFee > 0 && room.rakeReferenceId) {
+      await store.recordRevenue({
+        type: 'rake',
+        chips: room.lastFee,
+        roomId: room.id,
+        handId: room.handId || null,
+        referenceId: room.rakeReferenceId,
+        metadata: { feeRate: FEE_RATE, pot: room.pot, payout: room.lastPayout },
+      });
+    }
+    await store.recordHand(room);
+  }
+}
+
+function makeRoom(playerCount) {
+  return {
+    id: randomUUID(),
+    _version: 0,
+    playerCount,
+    players: [],
+    status: 'waiting',
+    round: 0,
+    pot: 0,
+    currentBet: 10,
+    cap: tableCapFor(playerCount),
+    message: 'Waiting for players...',
+    winnerId: null,
+    revealed: false,
+    lastFee: 0,
+    lastPayout: 0,
+    turnIndex: 0,
+    turnExpiresAt: 0,
+    lastAction: null,
+    lastActorId: null,
+    lastTimeoutPlayerId: null,
+    lastBetAmount: 0,
+    actionSeq: 0,
+    dealerTipTotal: 0,
+    lastTipAmount: 0,
+    lastTipPlayerId: null,
+    handId: null,
+    handCommitment: null,
+    handSeed: null,
+    handReveal: null,
+    rakeReferenceId: null,
+  };
+}
+
+async function joinRoom({ playerId, name, avatar, playerCount, excludeRoomId = '', accountId }) {
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 10) {
     throw new Error('playerCount must be 2..10');
   }
+  if (!accountId) throw new Error('Authenticated account required');
 
-  const q = queueFor(playerCount);
-  let room = q
-    .map(id => rooms.get(id))
-    .find(r => r && r.id !== excludeRoomId && r.status === 'waiting' && r.players.length < r.playerCount);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const q = queueFor(playerCount);
+    let room = q
+      .map(id => rooms.get(id))
+      .find(r => r && r.id !== excludeRoomId && r.status === 'waiting' && r.players.length < r.playerCount);
+    if (!room) room = await store.findWaitingRoom(playerCount, excludeRoomId);
+    if (!room) room = makeRoom(playerCount);
 
-  if (!room) {
-    room = {
-      id: randomUUID(),
-      playerCount,
-      players: [],
-      status: 'waiting',
-      round: 0,
-      pot: 0,
-      currentBet: 10,
-      cap: tableCapFor(playerCount),
-      message: 'Waiting for players...',
-      winnerId: null,
-      revealed: false,
-      lastFee: 0,
-      lastPayout: 0,
-      turnIndex: 0,
-      turnExpiresAt: 0,
-      lastAction: null,
-      lastActorId: null,
-      lastTimeoutPlayerId: null,
-      lastBetAmount: 0,
-      actionSeq: 0,
-      dealerTipTotal: 0,
-      lastTipAmount: 0,
-      lastTipPlayerId: null,
-    };
-    rooms.set(room.id, room);
-    q.push(room.id);
-  }
-
-  if (!room.players.some(p => p.id === playerId)) {
-    room.players.push({
-      id: playerId,
-      name: String(name || 'Player').slice(0, 24),
-      avatar: Math.max(1, Math.min(8, Number(avatar) || 1)),
-      chips: 10000,
-      folded: false,
-      seen: false,
-      readyNext: false,
-      cards: [],
-    });
-  } else {
     const existing = room.players.find(p => p.id === playerId);
-    existing.name = String(name || existing.name || 'Player').slice(0, 24);
-    existing.avatar = Math.max(1, Math.min(8, Number(avatar) || existing.avatar || 1));
-  }
+    let seat = null;
+    let reserveApplied = false;
+    if (!existing) {
+      const wallet = await store.getWallet(accountId);
+      const available = Number(wallet?.chip_balance || 0);
+      const configuredEntry = Math.max(10, Number(process.env.TABLE_ENTRY_CHIPS || 10000));
+      const entryChips = Math.min(available, configuredEntry);
+      if (entryChips < 10) throw new Error('Not enough wallet chips to enter a table');
+      const seatId = randomUUID();
+      const reserveRef = `table-reserve:${seatId}`;
+      await store.applyWalletTransaction({
+        userId: accountId,
+        chipsDelta: -entryChips,
+        type: 'table_reserve',
+        referenceId: reserveRef,
+        metadata: { roomId: room.id, playerCount },
+      });
+      reserveApplied = true;
+      seat = {
+        id: playerId,
+        accountId,
+        seatId,
+        reserveRef,
+        name: String(name || 'Player').slice(0, 24),
+        avatar: Math.max(1, Math.min(8, Number(avatar) || 1)),
+        chips: entryChips,
+        folded: false,
+        seen: false,
+        readyNext: false,
+        cards: [],
+      };
+      room.players.push(seat);
+    } else {
+      existing.name = String(name || existing.name || 'Player').slice(0, 24);
+      existing.avatar = Math.max(1, Math.min(8, Number(avatar) || existing.avatar || 1));
+      existing.accountId = existing.accountId || accountId;
+    }
 
-  room.message = `Waiting for players: ${room.players.length}/${room.playerCount}`;
-  if (room.players.length === room.playerCount) {
-    startRound(room);
-    queues.set(playerCount, q.filter(id => id !== room.id));
+    room.message = `Waiting for players: ${room.players.length}/${room.playerCount}`;
+    if (room.players.length === room.playerCount) {
+      startRound(room);
+      queues.set(playerCount, q.filter(id => id !== room.id));
+    } else if (!q.includes(room.id)) {
+      q.push(room.id);
+    }
+
+    try {
+      await persistRoom(room);
+      return room;
+    } catch (e) {
+      if (reserveApplied && seat) {
+        await store.applyWalletTransaction({
+          userId: accountId,
+          chipsDelta: seat.chips,
+          type: 'table_reserve_refund',
+          referenceId: `reserve-refund:${seat.seatId}`,
+          metadata: { roomId: room.id, reason: 'join_conflict' },
+        }).catch(() => {});
+      }
+      rooms.delete(room.id);
+      if (e.code !== 'ROOM_VERSION_CONFLICT' || attempt === 2) throw e;
+    }
   }
-  return room;
+  throw new Error('Could not join table; please retry');
 }
 
 
@@ -405,18 +518,47 @@ function leaveRoom(room, playerId) {
   }
 }
 
-function lobbyState() {
+async function lobbyState() {
+  const summary = await store.lobbySummary();
+  const byCount = new Map(summary.map(row => [Number(row.player_count), row]));
   const tables = [];
   for (let players = 2; players <= 10; players++) {
-    const matching = [...rooms.values()].filter(room => room.playerCount === players);
-    const waitingPlayers = matching
-      .filter(room => room.status === 'waiting')
-      .reduce((sum, room) => sum + room.players.length, 0);
-    const activeRooms = matching.filter(room => room.status === 'playing').length;
-    tables.push({ players, waitingPlayers, activeRooms });
+    const row = byCount.get(players) || {};
+    tables.push({
+      players,
+      waitingPlayers: Number(row.waiting_players || 0),
+      activeRooms: Number(row.active_rooms || 0),
+    });
   }
   return { tables, serverNow: Date.now() };
 }
+
+function paymentReadiness() {
+  const persistence = store.persistenceStatus();
+  const security = securityStatus();
+  const flags = {
+    licensed: String(process.env.REAL_MONEY_APPROVED || '').toLowerCase() === 'true',
+    identity: String(process.env.IDENTITY_PROVIDER_READY || '').toLowerCase() === 'true',
+    kyc: String(process.env.KYC_PROVIDER_READY || '').toLowerCase() === 'true',
+    geo: String(process.env.GEOLOCATION_PROVIDER_READY || '').toLowerCase() === 'true',
+    provider: String(process.env.PAYMENT_PROVIDER_APPROVED || '').toLowerCase() === 'true',
+    persistence: persistence.persistent,
+    auth: security.authSecretConfigured && security.authRequired,
+  };
+  const requested = String(process.env.CASH_MODE_ENABLED || '').toLowerCase() === 'true';
+  const blockers = Object.entries(flags).filter(([, ok]) => !ok).map(([name]) => name);
+  return { requested, enabled: requested && blockers.length === 0, blockers, flags, persistence, security };
+}
+
+function maskDestination(provider, destination) {
+  const value = String(destination || '');
+  if (provider === 'paypal' && value.includes('@')) {
+    const [left, right] = value.split('@');
+    return `${left.slice(0, 2)}***@${right}`;
+  }
+  return value.length > 4 ? `***${value.slice(-4)}` : value;
+}
+
 
 export async function handle(req, res, forcedRoute = '') {
   if (req.method === 'OPTIONS') return json(res, 204, {});
@@ -424,88 +566,182 @@ export async function handle(req, res, forcedRoute = '') {
   const route = String(forcedRoute || req.query?.route || url.searchParams.get('route') || url.pathname)
     .replace(/^\/+|\/+$/g, '');
 
-  if (req.method === 'GET' && (route === '' || route === 'health')) {
-    return json(res, 200, { ok: true, rooms: rooms.size, version: '1.3.0' });
-  }
-
-  if (req.method === 'GET' && route === 'lobby') {
-    return json(res, 200, lobbyState());
-  }
-
-
-  if (req.method === 'GET' && route === 'payments-config') {
-    const cashModeEnabled = String(process.env.CASH_MODE_ENABLED || '').toLowerCase() === 'true';
-    return json(res, 200, {
-      cashModeEnabled,
-      chipsPerUsd: 100,
-      mode: cashModeEnabled ? 'live_configured' : 'sandbox',
-      depositMethods: [
-        { id: 'apple_pay', label: 'Apple Pay', enabled: cashModeEnabled },
-        { id: 'cash_app', label: 'Cash App Pay', enabled: cashModeEnabled },
-        { id: 'card', label: 'Debit / credit card', enabled: cashModeEnabled },
-      ],
-      withdrawalMethods: [
-        { id: 'paypal', label: 'PayPal', enabled: cashModeEnabled },
-        { id: 'bank', label: 'Bank / ACH', enabled: cashModeEnabled },
-      ],
-    });
-  }
-
-  if (req.method === 'POST' && route === 'deposit-sandbox') {
-    try {
-      const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      const provider = String(body.provider || '').trim();
-      const amountUsd = Number(body.amountUsd || 0);
-      if (!playerId) return json(res, 400, { error: 'playerId required' });
-      if (!['apple_pay', 'cash_app', 'card'].includes(provider)) return json(res, 400, { error: 'Unsupported deposit provider' });
-      if (![5, 10, 25, 50].includes(amountUsd)) return json(res, 400, { error: 'Sandbox amount must be 5, 10, 25, or 50 USD' });
-      const chips = Math.round(amountUsd * 100);
+  try {
+    if (req.method === 'GET' && (route === '' || route === 'health')) {
+      const readiness = paymentReadiness();
       return json(res, 200, {
         ok: true,
-        mode: 'sandbox',
-        provider,
-        status: 'simulated_approved',
-        requestId: `DEP-SANDBOX-${randomUUID()}`,
-        amountUsd,
-        chips,
+        version: '1.4.0',
+        cachedRooms: rooms.size,
+        persistence: readiness.persistence,
+        security: readiness.security,
+        cashModeRequested: readiness.requested,
+        cashModeEnabled: readiness.enabled,
+        cashModeBlockers: readiness.blockers,
       });
-    } catch (e) {
-      return json(res, 400, { error: e.message });
     }
-  }
 
-  if (req.method === 'POST' && route === 'withdraw-sandbox') {
-    try {
+    if (req.method === 'POST' && route === 'auth/bootstrap') {
       const body = await readBody(req);
       const playerId = String(body.playerId || '').trim();
+      if (!playerId) return json(res, 400, { error: 'playerId required' });
+      const { user, wallet } = await store.ensureUser({
+        externalPlayerId: playerId,
+        displayName: body.name,
+        avatar: body.avatar,
+      });
+      const token = issueSessionToken({ playerId, accountId: user.id });
+      await store.audit({ actorUserId: user.id, eventType: 'auth_bootstrap', referenceId: playerId, metadata: clientFingerprint(req) });
+      return json(res, 200, {
+        ok: true,
+        token,
+        account: {
+          id: user.id,
+          playerId,
+          name: user.display_name,
+          avatar: user.avatar,
+          kycStatus: user.kyc_status,
+          ageVerified: Boolean(user.age_verified),
+          geoState: user.geo_state,
+          cashEligible: Boolean(user.cash_eligible),
+        },
+        wallet: {
+          chips: Number(wallet?.chip_balance || 0),
+          usdCents: Number(wallet?.usd_cents || 0),
+        },
+      });
+    }
+
+    if (req.method === 'GET' && route === 'lobby') {
+      return json(res, 200, await lobbyState());
+    }
+
+    if (req.method === 'GET' && route === 'payments-config') {
+      const readiness = paymentReadiness();
+      const approvedStates = String(process.env.APPROVED_CASH_STATES || '')
+        .split(',').map(v => v.trim().toUpperCase()).filter(Boolean);
+      return json(res, 200, {
+        cashModeEnabled: readiness.enabled,
+        cashModeRequested: readiness.requested,
+        blockers: readiness.blockers,
+        chipsPerUsd: 100,
+        mode: readiness.enabled ? 'live_ready' : 'sandbox_locked',
+        approvedStates,
+        depositMethods: [
+          { id: 'apple_pay', label: 'Apple Pay', enabled: readiness.enabled && String(process.env.APPLE_PAY_LIVE || '').toLowerCase() === 'true' },
+          { id: 'cash_app', label: 'Cash App Pay', enabled: readiness.enabled && String(process.env.CASH_APP_LIVE || '').toLowerCase() === 'true' },
+          { id: 'card', label: 'Debit / credit card', enabled: readiness.enabled && String(process.env.CARD_PAYMENTS_LIVE || '').toLowerCase() === 'true' },
+        ],
+        withdrawalMethods: [
+          { id: 'paypal', label: 'PayPal', enabled: readiness.enabled && String(process.env.PAYPAL_LIVE || '').toLowerCase() === 'true' },
+          { id: 'bank', label: 'Bank / ACH', enabled: readiness.enabled && String(process.env.BANK_PAYOUTS_LIVE || '').toLowerCase() === 'true' },
+        ],
+      });
+    }
+
+    if (req.method === 'GET' && route === 'wallet') {
+      const playerId = String(url.searchParams.get('playerId') || '');
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const wallet = await store.getWallet(user.id);
+      return json(res, 200, { ok: true, chips: Number(wallet?.chip_balance || 0), usdCents: Number(wallet?.usd_cents || 0) });
+    }
+
+    if (req.method === 'POST' && route === 'deposit-sandbox') {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const auth = requirePlayerAuth(req, playerId);
+      const provider = String(body.provider || '').trim();
+      const amountUsd = Number(body.amountUsd || 0);
+      if (!['apple_pay', 'cash_app', 'card'].includes(provider)) return json(res, 400, { error: 'Unsupported deposit provider' });
+      if (![5, 10, 25, 50].includes(amountUsd)) return json(res, 400, { error: 'Sandbox amount must be 5, 10, 25, or 50 USD' });
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const requestId = `DEP-SANDBOX-${randomUUID()}`;
+      const chips = Math.round(amountUsd * 100);
+      await store.createPaymentRequest({
+        userId: user.id, direction: 'deposit', provider, amountUsdCents: Math.round(amountUsd * 100), chips,
+        status: 'sandbox_approved', metadata: { cashValue: false },
+      });
+      const wallet = await store.applyWalletTransaction({
+        userId: user.id, chipsDelta: chips, type: 'sandbox_deposit', referenceId: requestId,
+        metadata: { provider, amountUsd, cashValue: false },
+      });
+      await store.audit({ actorUserId: user.id, eventType: 'sandbox_deposit', referenceId: requestId, metadata: { provider, amountUsd, chips } });
+      return json(res, 200, {
+        ok: true, mode: 'sandbox', provider, status: 'simulated_approved', requestId, amountUsd, chips,
+        walletChips: Number(wallet.chip_balance || 0),
+      });
+    }
+
+    if (req.method === 'POST' && route === 'withdraw-sandbox') {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const auth = requirePlayerAuth(req, playerId);
       const provider = String(body.provider || 'paypal').trim();
       const destination = String(body.destination || body.paypalEmail || '').trim();
       const chips = Number(body.chips || 0);
-      if (!playerId) return json(res, 400, { error: 'playerId required' });
       if (!['paypal', 'bank'].includes(provider)) return json(res, 400, { error: 'Unsupported withdrawal provider' });
       if (provider === 'paypal' && !destination.includes('@')) return json(res, 400, { error: 'Valid PayPal email required' });
       if (provider === 'bank' && destination.length < 4) return json(res, 400, { error: 'Bank payout reference required' });
       if (!Number.isInteger(chips) || chips <= 0) return json(res, 400, { error: 'Valid chip amount required' });
-      return json(res, 200, {
-        ok: true,
-        mode: 'sandbox',
-        provider,
-        status: 'not_sent',
-        requestId: `WD-SANDBOX-${randomUUID()}`,
-        chips,
-        usdPreview: Number((chips / 100).toFixed(2)),
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const requestId = `WD-SANDBOX-${randomUUID()}`;
+      const wallet = await store.applyWalletTransaction({
+        userId: user.id, chipsDelta: -chips, type: 'sandbox_withdraw_hold', referenceId: requestId,
+        metadata: { provider, cashValue: false },
       });
-    } catch (e) {
-      return json(res, 400, { error: e.message });
+      await store.createPaymentRequest({
+        userId: user.id, direction: 'withdrawal', provider, amountUsdCents: Math.round(chips), chips,
+        destinationMasked: maskDestination(provider, destination), status: 'sandbox_held', metadata: { cashValue: false, requestId },
+      });
+      await store.audit({ actorUserId: user.id, eventType: 'sandbox_withdrawal', referenceId: requestId, metadata: { provider, chips } });
+      return json(res, 200, {
+        ok: true, mode: 'sandbox', provider, status: 'not_sent', requestId, chips,
+        usdPreview: Number((chips / 100).toFixed(2)), walletChips: Number(wallet.chip_balance || 0),
+      });
     }
-  }
 
-  if (req.method === 'POST' && route === 'tip-dealer') {
-    try {
+    if (req.method === 'POST' && route === 'join') {
       const body = await readBody(req);
-      const room = rooms.get(String(body.roomId || ''));
+      const playerId = String(body.playerId || '').trim();
+      if (!playerId) return json(res, 400, { error: 'playerId required' });
+      const auth = requirePlayerAuth(req, playerId);
+      const account = await store.ensureUser({ externalPlayerId: playerId, displayName: body.name, avatar: body.avatar });
+      if (auth?.aid && String(auth.aid) !== String(account.user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const room = await joinRoom({
+        playerId, name: body.name, avatar: body.avatar, playerCount: Number(body.playerCount),
+        excludeRoomId: String(body.excludeRoomId || ''), accountId: account.user.id,
+      });
+      return json(res, 200, publicState(room, playerId));
+    }
+
+    if (req.method === 'GET' && route === 'state') {
+      const roomId = String(url.searchParams.get('roomId') || '');
+      const playerId = String(url.searchParams.get('playerId') || '');
+      requirePlayerAuth(req, playerId);
+      const room = await getRoom(roomId);
+      if (!room) return json(res, 404, { error: 'Room not found' });
+      const beforeSeq = Number(room.actionSeq || 0);
+      const state = publicState(room, playerId);
+      if (!state) return json(res, 403, { error: 'Player not in room' });
+      if (Number(room.actionSeq || 0) !== beforeSeq) {
+        await persistRoom(room);
+        await persistFinancialEffects(room);
+      }
+      return json(res, 200, state);
+    }
+
+    if (req.method === 'POST' && route === 'tip-dealer') {
+      const body = await readBody(req);
+      const room = await getRoom(String(body.roomId || ''));
       const playerId = String(body.playerId || '');
+      requirePlayerAuth(req, playerId);
       const chips = Number(body.chips || 0);
       if (!room) return json(res, 404, { error: 'Room not found' });
       const player = room.players.find(p => p.id === playerId);
@@ -516,59 +752,55 @@ export async function handle(req, res, forcedRoute = '') {
       room.dealerTipTotal = (room.dealerTipTotal || 0) + chips;
       room.lastTipAmount = chips;
       room.lastTipPlayerId = player.id;
+      room.lastTipReferenceId = `tip:${room.id}:${room.round}:${room.actionSeq + 1}:${player.id}`;
       room.actionSeq = (room.actionSeq || 0) + 1;
       room.lastAction = 'tip';
       room.lastActorId = player.id;
       room.lastBetAmount = 0;
       room.message = `${player.name} tipped the dealer ${chips} chips. Thank you!`;
+      await persistRoom(room);
+      await store.recordRevenue({
+        type: 'dealer_tip', chips, roomId: room.id, handId: room.handId || null,
+        referenceId: room.lastTipReferenceId, metadata: { playerId },
+      });
       return json(res, 200, publicState(room, playerId));
-    } catch (e) {
-      return json(res, 400, { error: e.message });
     }
-  }
 
-  if (req.method === 'POST' && route === 'leave') {
-    try {
+    if (req.method === 'POST' && route === 'leave') {
       const body = await readBody(req);
-      const room = rooms.get(String(body.roomId || ''));
+      const room = await getRoom(String(body.roomId || ''));
       const playerId = String(body.playerId || '');
+      const auth = requirePlayerAuth(req, playerId);
       if (!room) return json(res, 200, { ok: true, alreadyGone: true });
-      if (!room.players.some(p => p.id === playerId)) return json(res, 200, { ok: true, alreadyGone: true });
+      const leaving = room.players.find(p => p.id === playerId);
+      if (!leaving) return json(res, 200, { ok: true, alreadyGone: true });
+      const accountId = leaving.accountId || auth?.aid;
+      const releaseChips = Number(leaving.chips || 0);
+      const seatId = leaving.seatId || `${room.id}:${playerId}`;
       leaveRoom(room, playerId);
-      return json(res, 200, { ok: true });
-    } catch (e) {
-      return json(res, 400, { error: e.message });
+      if (!room.players.length) {
+        rooms.delete(room.id);
+        await store.deleteRoom(room.id);
+      } else {
+        await persistRoom(room);
+        await persistFinancialEffects(room);
+      }
+      let wallet = null;
+      if (accountId && releaseChips > 0) {
+        wallet = await store.applyWalletTransaction({
+          userId: accountId, chipsDelta: releaseChips, type: 'table_release', referenceId: `table-release:${seatId}`,
+          metadata: { roomId: room.id, playerId },
+        });
+      }
+      return json(res, 200, { ok: true, walletChips: wallet ? Number(wallet.chip_balance || 0) : null });
     }
-  }
 
-  if (req.method === 'POST' && route === 'join') {
-    try {
+    if (req.method === 'POST' && route === 'action') {
       const body = await readBody(req);
-      const playerId = String(body.playerId || '').trim();
-      if (!playerId) return json(res, 400, { error: 'playerId required' });
-      const room = joinRoom({ playerId, name: body.name, avatar: body.avatar, playerCount: Number(body.playerCount), excludeRoomId: String(body.excludeRoomId || '') });
-      return json(res, 200, publicState(room, playerId));
-    } catch (e) {
-      return json(res, 400, { error: e.message });
-    }
-  }
-
-  if (req.method === 'GET' && route === 'state') {
-    const room = rooms.get(url.searchParams.get('roomId'));
-    const playerId = url.searchParams.get('playerId');
-    if (!room) return json(res, 404, { error: 'Room not found' });
-    const state = publicState(room, playerId);
-    if (!state) return json(res, 403, { error: 'Player not in room' });
-    return json(res, 200, state);
-  }
-
-  if (req.method === 'POST' && route === 'action') {
-    try {
-      const body = await readBody(req);
-      const room = rooms.get(String(body.roomId || ''));
+      const room = await getRoom(String(body.roomId || ''));
       const playerId = String(body.playerId || '');
+      requirePlayerAuth(req, playerId);
       const action = String(body.action || '');
-
       if (!room) return json(res, 404, { error: 'Room not found' });
       tickRoom(room);
       const player = room.players.find(p => p.id === playerId);
@@ -592,25 +824,19 @@ export async function handle(req, res, forcedRoute = '') {
           room.turnExpiresAt = 0;
           room.lastPayout = 0;
           room.lastFee = 0;
-          for (const p of room.players) {
-            p.folded = false;
-            p.seen = false;
-            p.cards = [];
-          }
+          for (const p of room.players) { p.folded = false; p.seen = false; p.cards = []; }
           room.message = `Seat open: ${room.players.length}/${room.playerCount}. Waiting for player...`;
           addToQueue(room);
         }
+        await persistRoom(room);
+        await persistFinancialEffects(room);
         return json(res, 200, publicState(room, playerId));
       }
 
       if (room.status !== 'playing') return json(res, 409, { error: 'Round is not active' });
       if (player.folded) return json(res, 409, { error: 'Player already packed' });
-
       const current = room.players[room.turnIndex];
-      if (!current || current.id !== playerId) {
-        return json(res, 409, { error: 'Wait for your turn' });
-      }
-
+      if (!current || current.id !== playerId) return json(res, 409, { error: 'Wait for your turn' });
       room.lastActorId = player.id;
       room.lastTimeoutPlayerId = null;
       room.lastBetAmount = 0;
@@ -621,65 +847,49 @@ export async function handle(req, res, forcedRoute = '') {
         room.actionSeq = (room.actionSeq || 0) + 1;
         room.lastAction = 'see';
         room.message = `${player.name} is now SEEN. Their cards are open only to them.`;
-        // Seeing cards does not consume the turn. The active player's server timer keeps running.
       } else if (action === 'blind') {
         if (player.seen) return json(res, 409, { error: 'You are Seen. Use Chaal.' });
         if (room.pot >= room.cap) return json(res, 409, { error: 'Table limit reached. Use Show.' });
         const amount = Math.min(room.currentBet, room.cap - room.pot, player.chips);
         if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
-        player.chips -= amount;
-        room.pot += amount;
-        room.lastBetAmount = amount;
-        room.actionSeq = (room.actionSeq || 0) + 1;
-        room.lastAction = 'blind';
-        room.message = `${player.name} plays BLIND for ${amount} chips.`;
-        // Blind keeps the same base stake. Seen players automatically pay double with Chaal.
-        advanceTurn(room);
+        player.chips -= amount; room.pot += amount; room.lastBetAmount = amount;
+        room.actionSeq = (room.actionSeq || 0) + 1; room.lastAction = 'blind';
+        room.message = `${player.name} plays BLIND for ${amount} chips.`; advanceTurn(room);
       } else if (action === 'chaal') {
         if (!player.seen) return json(res, 409, { error: 'See your cards before Chaal' });
         if (room.pot >= room.cap) return json(res, 409, { error: 'Table limit reached. Use Show.' });
         const amount = Math.min(room.currentBet * 2, room.cap - room.pot, player.chips);
         if (amount <= 0) return json(res, 409, { error: 'Not enough chips' });
-        player.chips -= amount;
-        room.pot += amount;
-        room.lastBetAmount = amount;
-        room.actionSeq = (room.actionSeq || 0) + 1;
-        room.lastAction = 'chaal';
-        room.message = `${player.name} plays CHAAL for ${amount} chips.`;
-        advanceTurn(room);
+        player.chips -= amount; room.pot += amount; room.lastBetAmount = amount;
+        room.actionSeq = (room.actionSeq || 0) + 1; room.lastAction = 'chaal';
+        room.message = `${player.name} plays CHAAL for ${amount} chips.`; advanceTurn(room);
       } else if (action === 'pack') {
-        player.folded = true;
-        room.actionSeq = (room.actionSeq || 0) + 1;
-        room.lastAction = 'pack';
-        room.message = `${player.name} packed.`;
-        maybeSettleLastStanding(room);
-        if (room.status === 'playing') advanceTurn(room);
+        player.folded = true; room.actionSeq = (room.actionSeq || 0) + 1; room.lastAction = 'pack';
+        room.message = `${player.name} packed.`; maybeSettleLastStanding(room); if (room.status === 'playing') advanceTurn(room);
       } else if (action === 'show') {
-        room.actionSeq = (room.actionSeq || 0) + 1;
-        room.lastAction = 'show';
-        room.message = `${player.name} called Show.`;
-        settle(room);
+        room.actionSeq = (room.actionSeq || 0) + 1; room.lastAction = 'show'; room.message = `${player.name} called Show.`; settle(room);
       } else if (action === 'sideshow') {
         if (!player.seen) return json(res, 409, { error: 'See your cards before Side Show' });
         const target = eligibleSideShowTarget(room, player);
         if (!target) return json(res, 409, { error: 'No eligible seen player for Side Show' });
         const comparison = compareHands(player.cards, target.cards);
-        const loser = comparison > 0 ? target : player; // requester loses ties
-        loser.folded = true;
-        room.actionSeq = (room.actionSeq || 0) + 1;
-        room.lastAction = 'sideshow';
+        const loser = comparison > 0 ? target : player;
+        loser.folded = true; room.actionSeq = (room.actionSeq || 0) + 1; room.lastAction = 'sideshow';
         room.message = `${player.name} Side Show vs ${target.name}. ${loser.name} packs.`;
-        maybeSettleLastStanding(room);
-        if (room.status === 'playing') advanceTurn(room);
+        maybeSettleLastStanding(room); if (room.status === 'playing') advanceTurn(room);
       } else {
         return json(res, 400, { error: 'Unknown action' });
       }
 
+      await persistRoom(room);
+      await persistFinancialEffects(room);
       return json(res, 200, publicState(room, playerId));
-    } catch (e) {
-      return json(res, 400, { error: e.message });
     }
-  }
 
-  return json(res, 404, { error: 'Not found' });
+    return json(res, 404, { error: 'Not found' });
+  } catch (e) {
+    const status = Number(e.statusCode || (e.code === 'ROOM_VERSION_CONFLICT' ? 409 : 400));
+    return json(res, status, { error: e.message || 'Request failed', code: e.code || null });
+  }
 }
+

@@ -1,9 +1,10 @@
 {
   "name": "three-patti-social-backend",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node -c server.js && node -c game.js && node -c store.js && node -c security.js"
   }
 }

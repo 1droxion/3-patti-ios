@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -22,6 +23,15 @@ const blueAccent = Color(0xFF3D9CFF);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  var playerId = prefs.getString('three_patti_player_id');
+  if (playerId == null || playerId.isEmpty) {
+    playerId = 'p-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(99999)}';
+    await prefs.setString('three_patti_player_id', playerId);
+  }
+  final displayName = prefs.getString('three_patti_display_name') ?? 'Player';
+  final avatarIndex = (prefs.getInt('three_patti_avatar') ?? 1).clamp(1, 8).toInt();
+
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
@@ -33,18 +43,28 @@ Future<void> main() async {
     statusBarIconBrightness: Brightness.light,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
-  runApp(const ThreePattiApp());
+  runApp(ThreePattiApp(playerId: playerId, displayName: displayName, avatarIndex: avatarIndex));
 }
 
 class ThreePattiApp extends StatefulWidget {
-  const ThreePattiApp({super.key});
+  final String playerId;
+  final String displayName;
+  final int avatarIndex;
+
+  const ThreePattiApp({super.key, required this.playerId, required this.displayName, required this.avatarIndex});
 
   @override
   State<ThreePattiApp> createState() => _ThreePattiAppState();
 }
 
 class _ThreePattiAppState extends State<ThreePattiApp> {
-  final session = AppSession();
+  late final AppSession session;
+
+  @override
+  void initState() {
+    super.initState();
+    session = AppSession(playerId: widget.playerId, displayName: widget.displayName, avatarIndex: widget.avatarIndex);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,15 +93,16 @@ class _ThreePattiAppState extends State<ThreePattiApp> {
 }
 
 class AppSession extends ChangeNotifier {
-  String displayName = 'Player';
+  String displayName;
   int walletChips = 10000;
   int navPage = 0; // 0 home, 1 store, 2 history, 3 profile, 4 wallet, 5 withdraw, 6 settings, 7 support, 8 rules
   bool soundEnabled = true;
   bool musicEnabled = true;
-  int avatarIndex = 1;
-  final String playerId =
-      'p-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(99999)}';
+  int avatarIndex;
+  final String playerId;
   final List<GameHistoryItem> history = [];
+
+  AppSession({required this.playerId, this.displayName = 'Player', this.avatarIndex = 1});
 
   void setPage(int value) {
     if (navPage == value) return;
@@ -93,6 +114,7 @@ class AppSession extends ChangeNotifier {
     final cleaned = value.trim();
     if (cleaned.isEmpty) return;
     displayName = cleaned.length > 24 ? cleaned.substring(0, 24) : cleaned;
+    unawaited(SharedPreferences.getInstance().then((prefs) => prefs.setString('three_patti_display_name', displayName)));
     notifyListeners();
   }
 
@@ -112,6 +134,7 @@ class AppSession extends ChangeNotifier {
     final next = value.clamp(1, 8).toInt();
     if (avatarIndex == next) return;
     avatarIndex = next;
+    unawaited(SharedPreferences.getInstance().then((prefs) => prefs.setInt('three_patti_avatar', avatarIndex)));
     notifyListeners();
   }
 
@@ -136,6 +159,10 @@ class AppSession extends ChangeNotifier {
     musicEnabled = true;
     avatarIndex = 1;
     navPage = 0;
+    unawaited(SharedPreferences.getInstance().then((prefs) async {
+      await prefs.setString('three_patti_display_name', 'Player');
+      await prefs.setInt('three_patti_avatar', 1);
+    }));
     notifyListeners();
   }
 }
@@ -169,6 +196,13 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   final scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    Api.configureSession(widget.session);
+    unawaited(Api.ensureSession());
+  }
 
   void goHome() => widget.session.setPage(0);
 
@@ -1282,7 +1316,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.3', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.4', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1639,7 +1673,8 @@ class _WalletViewState extends State<WalletView> {
       });
       if (!mounted) return;
       final chips = result['chips'] as int? ?? 0;
-      widget.session.updateWallet(widget.session.walletChips + chips);
+      final walletChips = result['walletChips'];
+      widget.session.updateWallet(walletChips is int ? walletChips : widget.session.walletChips + chips);
       HapticFeedback.mediumImpact();
       setState(() {
         requestId = '${result['requestId']}';
@@ -1802,6 +1837,8 @@ class _WithdrawViewState extends State<WithdrawView> {
         'chips': chips,
       });
       if (!mounted) return;
+      final walletChips = result['walletChips'];
+      if (walletChips is int) widget.session.updateWallet(walletChips);
       setState(() {
         requestId = '${result['requestId']}';
         message = '${_providerLabel(provider)} sandbox withdrawal created. No real payout was sent.';
@@ -2525,12 +2562,14 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
 
   Future<void> _leaveTable() async {
     try {
-      await Api.post('/leave', {
+      final result = await Api.post('/leave', {
         'roomId': widget.roomId,
         'playerId': widget.session.playerId,
       });
+      final walletChips = result['walletChips'];
+      if (walletChips is int) widget.session.updateWallet(walletChips);
     } catch (_) {
-      // Navigation should still succeed if the prototype room already disappeared.
+      // Navigation should still succeed if the table already disappeared.
     }
   }
 
@@ -4535,32 +4574,99 @@ class Api {
     ..idleTimeout = const Duration(seconds: 30)
     ..maxConnectionsPerHost = 8;
 
+  static AppSession? _session;
+  static String? _token;
+  static Future<void>? _bootstrapFuture;
+
+  static void configureSession(AppSession session) {
+    _session = session;
+  }
+
+  static Future<void> ensureSession() async {
+    if (_token != null || _session == null) return;
+    _bootstrapFuture ??= _bootstrap();
+    try {
+      await _bootstrapFuture;
+    } finally {
+      _bootstrapFuture = null;
+    }
+  }
+
+  static Future<void> _bootstrap() async {
+    final session = _session;
+    if (session == null) return;
+    final data = await _rawPost('/auth/bootstrap', {
+      'playerId': session.playerId,
+      'name': session.displayName,
+      'avatar': session.avatarIndex,
+    }, includeAuth: false);
+    final token = data['token'];
+    if (token is String && token.isNotEmpty) _token = token;
+    final wallet = data['wallet'];
+    if (wallet is Map) {
+      final chips = wallet['chips'];
+      if (chips is int) session.updateWallet(chips);
+    }
+  }
+
   static Future<Map<String, dynamic>> get(String path) async {
+    await ensureSession();
+    try {
+      return await _rawGet(path);
+    } on _ApiUnauthorized {
+      _token = null;
+      await ensureSession();
+      return _rawGet(path);
+    }
+  }
+
+  static Future<Map<String, dynamic>> post(String path, Map<String, dynamic> payload) async {
+    if (path != '/auth/bootstrap') await ensureSession();
+    try {
+      return await _rawPost(path, payload, includeAuth: path != '/auth/bootstrap');
+    } on _ApiUnauthorized {
+      if (path == '/auth/bootstrap') rethrow;
+      _token = null;
+      await ensureSession();
+      return _rawPost(path, payload);
+    }
+  }
+
+  static Future<Map<String, dynamic>> _rawGet(String path) async {
     final req = await _client.getUrl(Uri.parse('$apiBaseUrl$path'));
     req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    if (_token != null) req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_token');
     final res = await req.close();
     final body = await utf8.decoder.bind(res).join();
     final data = jsonDecode(body) as Map<String, dynamic>;
+    if (res.statusCode == 401) throw const _ApiUnauthorized();
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(data['error'] ?? 'HTTP ${res.statusCode}');
     }
     return data;
   }
 
-  static Future<Map<String, dynamic>> post(String path, Map<String, dynamic> payload) async {
+  static Future<Map<String, dynamic>> _rawPost(String path, Map<String, dynamic> payload, {bool includeAuth = true}) async {
     final req = await _client.postUrl(Uri.parse('$apiBaseUrl$path'));
     req.headers.contentType = ContentType.json;
     req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    if (includeAuth && _token != null) req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_token');
     req.write(jsonEncode(payload));
     final res = await req.close();
     final body = await utf8.decoder.bind(res).join();
     final data = jsonDecode(body) as Map<String, dynamic>;
+    if (res.statusCode == 401) throw const _ApiUnauthorized();
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(data['error'] ?? 'HTTP ${res.statusCode}');
     }
     return data;
   }
 }
+
+class _ApiUnauthorized implements Exception {
+  const _ApiUnauthorized();
+}
+
 
 BoxDecoration _panelDecoration() => BoxDecoration(
   color: const Color(0xFF0A1712),

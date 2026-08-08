@@ -199,3 +199,6 @@ alter table public.users add column if not exists government_id_type text;
 alter table public.users add column if not exists government_id_last4 text;
 alter table public.users add column if not exists government_id_hash text;
 alter table public.users add column if not exists age_declared_21 boolean not null default false;
+
+-- V1.6 social monetization. Social chips have no cash redemption value.
+alter table public.users add column if not exists vip_until timestamptz;

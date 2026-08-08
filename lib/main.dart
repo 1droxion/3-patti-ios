@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -95,9 +96,10 @@ class _ThreePattiAppState extends State<ThreePattiApp> {
 class AppSession extends ChangeNotifier {
   String displayName;
   int walletChips = 10000;
-  int navPage = 0; // 0 home, 1 store, 2 history, 3 profile, 4 wallet, 5 withdraw, 6 settings, 7 support, 8 rules
+  int navPage = 0; // 0 home, 1 store, 2 history, 3 profile, 4 chips, 6 settings, 7 support, 8 rules
   bool soundEnabled = true;
   bool musicEnabled = true;
+  bool vipActive = false;
   int avatarIndex;
   final String playerId;
   final List<GameHistoryItem> history = [];
@@ -130,6 +132,12 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setVipActive(bool value) {
+    if (vipActive == value) return;
+    vipActive = value;
+    notifyListeners();
+  }
+
   void updateAvatar(int value) {
     final next = value.clamp(1, 8).toInt();
     if (avatarIndex == next) return;
@@ -157,6 +165,7 @@ class AppSession extends ChangeNotifier {
     history.clear();
     soundEnabled = true;
     musicEnabled = true;
+    vipActive = false;
     avatarIndex = 1;
     navPage = 0;
     unawaited(SharedPreferences.getInstance().then((prefs) async {
@@ -211,7 +220,7 @@ class _AppShellState extends State<AppShell> {
         2 => HistoryView(session: widget.session),
         3 => ProfileView(session: widget.session),
         4 => WalletView(session: widget.session),
-        5 => WithdrawView(session: widget.session),
+        5 => WalletView(session: widget.session),
         6 => SettingsView(session: widget.session),
         7 => SupportView(session: widget.session),
         8 => RulesView(session: widget.session),
@@ -1308,15 +1317,14 @@ class AppMenu extends StatelessWidget {
                     _MenuTile(icon: Icons.history_rounded, label: 'History', selected: activePage == 2, onTap: () => _select(context, 2)),
                     _MenuTile(icon: Icons.person_rounded, label: 'Profile', selected: activePage == 3, onTap: () => _select(context, 3)),
                     const Padding(padding: EdgeInsets.symmetric(vertical: 3), child: Divider(color: Colors.white10)),
-                    _MenuTile(icon: Icons.account_balance_wallet_rounded, label: 'Wallet', selected: activePage == 4, onTap: () => _select(context, 4)),
-                    _MenuTile(icon: Icons.upload_rounded, label: 'Withdraw', selected: activePage == 5, onTap: () => _select(context, 5)),
+                    _MenuTile(icon: Icons.paid_rounded, label: 'Social Chips', selected: activePage == 4, onTap: () => _select(context, 4)),
                     _MenuTile(icon: Icons.settings_rounded, label: 'Settings', selected: activePage == 6, onTap: () => _select(context, 6)),
                     _MenuTile(icon: Icons.support_agent_rounded, label: 'Support', selected: activePage == 7, onTap: () => _select(context, 7)),
                     _MenuTile(icon: Icons.gavel_rounded, label: 'Rules & fees', selected: activePage == 8, onTap: () => _select(context, 8)),
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.5', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.6', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1359,44 +1367,240 @@ class _MenuTile extends StatelessWidget {
   }
 }
 
-class StoreView extends StatelessWidget {
-  final AppSession session;
+const _socialProductIds = <String>{
+  'com.droxion.threepatti.chips25k',
+  'com.droxion.threepatti.chips150k',
+  'com.droxion.threepatti.chips400k',
+  'com.droxion.threepatti.chips1m',
+  'com.droxion.threepatti.vip.monthly',
+};
 
+class _SocialOffer {
+  final String id;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool vip;
+  const _SocialOffer(this.id, this.title, this.subtitle, this.icon, {this.vip = false});
+}
+
+const _socialOffers = <_SocialOffer>[
+  _SocialOffer('com.droxion.threepatti.chips25k', '25K CHIPS', 'Starter chip pack', Icons.paid_rounded),
+  _SocialOffer('com.droxion.threepatti.chips150k', '150K CHIPS', 'Best for regular play', Icons.stars_rounded),
+  _SocialOffer('com.droxion.threepatti.chips400k', '400K CHIPS', 'Big social chip pack', Icons.local_fire_department_rounded),
+  _SocialOffer('com.droxion.threepatti.chips1m', '1M CHIPS', 'Mega social chip pack', Icons.diamond_rounded),
+  _SocialOffer('com.droxion.threepatti.vip.monthly', 'VIP MONTHLY', 'VIP badge + premium status', Icons.workspace_premium_rounded, vip: true),
+];
+
+class StoreView extends StatefulWidget {
+  final AppSession session;
   const StoreView({super.key, required this.session});
 
   @override
+  State<StoreView> createState() => _StoreViewState();
+}
+
+class _StoreViewState extends State<StoreView> {
+  final InAppPurchase _iap = InAppPurchase.instance;
+  StreamSubscription<List<PurchaseDetails>>? _purchaseSub;
+  Map<String, ProductDetails> products = {};
+  final Set<String> claiming = {};
+  bool storeAvailable = false;
+  bool loading = true;
+  String message = 'Loading App Store products…';
+
+  @override
+  void initState() {
+    super.initState();
+    _purchaseSub = _iap.purchaseStream.listen(_onPurchases, onError: (Object e) {
+      if (mounted) setState(() => message = 'Purchase update error: $e');
+    });
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _purchaseSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      storeAvailable = await _iap.isAvailable();
+      if (storeAvailable) {
+        final response = await _iap.queryProductDetails(_socialProductIds);
+        products = {for (final p in response.productDetails) p.id: p};
+        if (response.error != null) {
+          message = 'App Store: ${response.error!.message}';
+        } else if (products.isEmpty) {
+          message = 'Create the 5 products in App Store Connect to activate purchases.';
+        } else {
+          message = 'SOCIAL CHIPS • NO CASH VALUE • NO WITHDRAWAL';
+        }
+      } else {
+        message = 'App Store purchases are unavailable on this device.';
+      }
+      try {
+        final cfg = await Api.get('/social/store-config?playerId=${Uri.encodeQueryComponent(widget.session.playerId)}');
+        final wallet = cfg['wallet'];
+        if (wallet is Map && wallet['chips'] is int) widget.session.updateWallet(wallet['chips'] as int);
+        widget.session.setVipActive(cfg['vipActive'] == true);
+      } catch (_) {}
+    } catch (e) {
+      message = 'Could not load store: $e';
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _buy(_SocialOffer offer) async {
+    final product = products[offer.id];
+    if (!storeAvailable || product == null) {
+      setState(() => message = 'This product is not active in App Store Connect yet.');
+      return;
+    }
+    HapticFeedback.selectionClick();
+    final param = PurchaseParam(productDetails: product);
+    if (offer.vip) {
+      await _iap.buyNonConsumable(purchaseParam: param);
+    } else {
+      await _iap.buyConsumable(purchaseParam: param, autoConsume: true);
+    }
+  }
+
+  Future<void> _onPurchases(List<PurchaseDetails> updates) async {
+    for (final purchase in updates) {
+      if (purchase.status == PurchaseStatus.pending) {
+        if (mounted) setState(() => message = 'Waiting for App Store confirmation…');
+        continue;
+      }
+      if (purchase.status == PurchaseStatus.error) {
+        if (mounted) setState(() => message = purchase.error?.message ?? 'Purchase failed.');
+      } else if (purchase.status == PurchaseStatus.canceled) {
+        if (mounted) setState(() => message = 'Purchase canceled.');
+      } else if (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) {
+        await _claimPurchase(purchase);
+      }
+      if (purchase.pendingCompletePurchase) {
+        await _iap.completePurchase(purchase);
+      }
+    }
+  }
+
+  Future<void> _claimPurchase(PurchaseDetails purchase) async {
+    final purchaseId = purchase.purchaseID ?? '${purchase.productID}:${purchase.transactionDate ?? DateTime.now().millisecondsSinceEpoch}';
+    if (!claiming.add(purchaseId)) return;
+    try {
+      final result = await Api.post('/social/iap/claim', {
+        'playerId': widget.session.playerId,
+        'productId': purchase.productID,
+        'transactionId': purchaseId,
+        'transactionDate': purchase.transactionDate,
+        'verificationSource': purchase.verificationData.source,
+        'verificationData': purchase.verificationData.serverVerificationData,
+      });
+      final chips = result['walletChips'];
+      if (chips is int) widget.session.updateWallet(chips);
+      widget.session.setVipActive(result['vipActive'] == true);
+      HapticFeedback.mediumImpact();
+      if (mounted) {
+        setState(() {
+          message = result['idempotent'] == true
+              ? 'Purchase already delivered.'
+              : '${result['message'] ?? 'Purchase delivered.'}';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => message = 'Purchase verification pending: $e');
+    } finally {
+      claiming.remove(purchaseId);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    const items = [
-      ('Emerald Table', Icons.table_restaurant_rounded, 'Table theme'),
-      ('Royal Blue Table', Icons.style_rounded, 'Table theme'),
-      ('Gold Avatar Frame', Icons.account_circle_rounded, 'Profile cosmetic'),
-      ('Card Back Pack', Icons.layers_rounded, 'Card cosmetic'),
-    ];
     return PageFrame(
-      title: 'STORE',
-      subtitle: 'Cosmetics and non-wagering upgrades',
-      child: GridView.count(
-        crossAxisCount: MediaQuery.sizeOf(context).width > 800 ? 4 : 2,
-        childAspectRatio: 1.45,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        children: items.map((item) {
-          return Container(
-            padding: const EdgeInsets.all(16),
-            decoration: _panelDecoration(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      title: 'SOCIAL STORE',
+      subtitle: 'Virtual chips and VIP — never redeemable for cash',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0C2117),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF7A5A16)),
+            ),
+            child: Row(
               children: [
-                Icon(item.$2, color: gold, size: 34),
+                const CasinoChip(color: Color(0xFFE4B530), size: 30),
+                const SizedBox(width: 9),
+                Text('${_money(widget.session.walletChips)} CHIPS', style: const TextStyle(fontSize: 18, color: gold, fontWeight: FontWeight.w900)),
+                if (widget.session.vipActive) ...[
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: const Color(0xFF5B3A04), borderRadius: BorderRadius.circular(99), border: Border.all(color: gold)),
+                    child: const Text('VIP', style: TextStyle(color: Color(0xFFFFE39A), fontSize: 9, fontWeight: FontWeight.w900)),
+                  ),
+                ],
                 const Spacer(),
-                Text(item.$1, style: const TextStyle(fontWeight: FontWeight.w900)),
-                Text(item.$3, style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                const SizedBox(height: 8),
-                const Text('COMING SOON', style: TextStyle(color: gold, fontSize: 10, fontWeight: FontWeight.w900)),
+                TextButton.icon(
+                  onPressed: storeAvailable ? () => _iap.restorePurchases() : null,
+                  icon: const Icon(Icons.restore_rounded, size: 17),
+                  label: const Text('RESTORE'),
+                ),
               ],
             ),
-          );
-        }).toList(),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: GridView.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: MediaQuery.sizeOf(context).width > 900 ? 5 : 3,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.3,
+              ),
+              itemCount: _socialOffers.length,
+              itemBuilder: (context, index) {
+                final offer = _socialOffers[index];
+                final product = products[offer.id];
+                return InkWell(
+                  onTap: loading ? null : () => _buy(offer),
+                  borderRadius: BorderRadius.circular(22),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: offer.vip
+                          ? const LinearGradient(colors: [Color(0xFF6A4305), Color(0xFF1B1203)])
+                          : const LinearGradient(colors: [Color(0xFF0D482A), Color(0xFF06170F)]),
+                      border: Border.all(color: offer.vip ? gold : const Color(0xFF39915A)),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 10, offset: Offset(0, 5))],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(offer.icon, color: offer.vip ? gold : const Color(0xFF74F095), size: 30),
+                        const Spacer(),
+                        Text(offer.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                        const SizedBox(height: 2),
+                        Text(offer.subtitle, style: const TextStyle(fontSize: 9.5, color: Colors.white54)),
+                        const SizedBox(height: 8),
+                        Text(product?.price ?? 'SET UP IN APP STORE', style: TextStyle(fontSize: 11, color: product == null ? Colors.white38 : gold, fontWeight: FontWeight.w900)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9.5, color: Colors.white54, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 3),
+          const Text('Purchased chips are virtual entertainment credits only. They cannot be sold, transferred, redeemed, or withdrawn for money.', textAlign: TextAlign.center, style: TextStyle(fontSize: 8.5, color: Colors.white38)),
+        ],
       ),
     );
   }
@@ -1506,12 +1710,7 @@ class ProfileView extends StatelessWidget {
                         label: const Text('EDIT DISPLAY NAME'),
                       ),
                       const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => KycScreen(session: session))),
-                        icon: const Icon(Icons.verified_user_rounded, color: gold),
-                        label: const Text('VERIFY IDENTITY / 21+'),
-                        style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFFFE0A0), side: const BorderSide(color: Color(0xFF8C6718))),
-                      ),
+                      const Text('SOCIAL MODE • NO CASH VALUE', style: TextStyle(fontSize: 9.5, color: Colors.white54, fontWeight: FontWeight.w800)),
                     ],
                   ),
                 ),
@@ -1807,164 +2006,58 @@ class PageFrame extends StatelessWidget {
 }
 
 
-class WalletView extends StatefulWidget {
+class WalletView extends StatelessWidget {
   final AppSession session;
   const WalletView({super.key, required this.session});
 
   @override
-  State<WalletView> createState() => _WalletViewState();
-}
-
-class _WalletViewState extends State<WalletView> {
-  bool loading = true;
-  bool cashModeEnabled = false;
-  String? message;
-  String? requestId;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadConfig();
-  }
-
-  Future<void> _loadConfig() async {
-    try {
-      final result = await Api.get('/payments-config');
-      if (!mounted) return;
-      setState(() {
-        cashModeEnabled = result['cashModeEnabled'] == true;
-        loading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  Future<void> _depositSandbox(String provider) async {
-    final amount = await showDialog<int>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF08120E),
-        title: Text('${_providerLabel(provider)} DEPOSIT', style: const TextStyle(color: gold, fontWeight: FontWeight.w900)),
-        content: const Text('Choose a sandbox amount. No real money will be charged in this build.'),
-        actions: [
-          for (final dollars in [5, 10, 25, 50])
-            TextButton(onPressed: () => Navigator.pop(context, dollars), child: Text('\$$dollars')),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
-        ],
-      ),
-    );
-    if (amount == null || !mounted) return;
-    setState(() {
-      message = null;
-      requestId = null;
-    });
-    try {
-      final result = await Api.post('/deposit-sandbox', {
-        'playerId': widget.session.playerId,
-        'provider': provider,
-        'amountUsd': amount,
-      });
-      if (!mounted) return;
-      final chips = result['chips'] as int? ?? 0;
-      final walletChips = result['walletChips'];
-      widget.session.updateWallet(walletChips is int ? walletChips : widget.session.walletChips + chips);
-      HapticFeedback.mediumImpact();
-      setState(() {
-        requestId = '${result['requestId']}';
-        message = '\$$amount sandbox deposit approved → +${_money(chips)} chips.';
-      });
-    } catch (e) {
-      if (mounted) setState(() => message = '$e');
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     return PageFrame(
-      title: 'WALLET',
-      subtitle: cashModeEnabled ? 'Cash funding enabled for approved market' : 'Payment rails prepared — cash mode locked',
+      title: 'SOCIAL CHIPS',
+      subtitle: 'Entertainment credits only — no cash value',
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 840),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: _MetricCard(label: 'CHIP BALANCE', value: '${_money(widget.session.walletChips)} CHIPS', helper: 'Server cash ledger is not live yet')),
-                    const SizedBox(width: 12),
-                    Expanded(child: _MetricCard(label: 'CASH MODE', value: cashModeEnabled ? 'ENABLED' : 'LOCKED', helper: cashModeEnabled ? 'Configured by server' : 'Waiting for licensing + processor approval')),
-                  ],
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 150,
+                height: 150,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const RadialGradient(colors: [Color(0xFFFFE58A), Color(0xFFD6930B), Color(0xFF5F3700)]),
+                  border: Border.all(color: const Color(0xFFFFEDB0), width: 4),
+                  boxShadow: const [BoxShadow(color: Color(0x887A5000), blurRadius: 28)],
                 ),
-                const SizedBox(height: 14),
-                const Text('DEPOSIT METHODS', style: TextStyle(fontSize: 17, color: gold, fontWeight: FontWeight.w900, letterSpacing: .8)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(child: _PaymentRailCard(icon: Icons.apple, title: 'APPLE PAY', subtitle: 'Deposit', badge: cashModeEnabled ? 'READY' : 'SANDBOX', onTap: () => _depositSandbox('apple_pay'))),
-                    const SizedBox(width: 10),
-                    Expanded(child: _PaymentRailCard(icon: Icons.attach_money_rounded, title: 'CASH APP PAY', subtitle: 'Deposit', badge: cashModeEnabled ? 'READY' : 'SANDBOX', onTap: () => _depositSandbox('cash_app'))),
-                    const SizedBox(width: 10),
-                    Expanded(child: _PaymentRailCard(icon: Icons.credit_card_rounded, title: 'CARD', subtitle: 'Debit / credit', badge: cashModeEnabled ? 'READY' : 'SANDBOX', onTap: () => _depositSandbox('card'))),
-                  ],
+                child: const Icon(Icons.stars_rounded, size: 72, color: Color(0xFF4D2C00)),
+              ),
+              const SizedBox(height: 14),
+              Text('${_money(session.walletChips)} CHIPS', style: const TextStyle(fontSize: 31, color: gold, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 3),
+              const Text('SOCIAL CHIP BALANCE', style: TextStyle(fontSize: 10, color: Colors.white54, fontWeight: FontWeight.w900, letterSpacing: 1)),
+              if (session.vipActive) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(color: const Color(0xFF563804), borderRadius: BorderRadius.circular(99), border: Border.all(color: gold)),
+                  child: const Text('★ VIP ACTIVE', style: TextStyle(color: Color(0xFFFFE0A0), fontSize: 11, fontWeight: FontWeight.w900)),
                 ),
-                if (message != null) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(11),
-                    decoration: BoxDecoration(
-                      color: requestId == null ? const Color(0xFF351C15) : const Color(0xFF0F3020),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: requestId == null ? Colors.orangeAccent : const Color(0xFF59E781)),
-                    ),
-                    child: Text(requestId == null ? message! : '$message\nRequest: $requestId', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700)),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                if (loading) const LinearProgressIndicator(minHeight: 2, color: gold),
-                const _PrototypeNotice(),
               ],
-            ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                onPressed: () => session.setPage(1),
+                icon: const Icon(Icons.shopping_bag_rounded),
+                label: const Text('GET MORE CHIPS'),
+              ),
+              const SizedBox(height: 11),
+              const Text(
+                'Social chips can only be used inside 3 Patti Social. They cannot be withdrawn, redeemed for USD, transferred to PayPal/bank, or exchanged for anything of value.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10.5, color: Colors.white54, height: 1.4),
+              ),
+            ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PaymentRailCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final String badge;
-  final VoidCallback onTap;
-
-  const _PaymentRailCard({required this.icon, required this.title, required this.subtitle, required this.badge, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: _panelDecoration(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(width: 40, height: 40, decoration: BoxDecoration(color: const Color(0xFF101B16), borderRadius: BorderRadius.circular(13), border: Border.all(color: gold.withValues(alpha: .45))), child: Icon(icon, color: gold)),
-                const Spacer(),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: const Color(0xFF0E2A1C), borderRadius: BorderRadius.circular(99), border: Border.all(color: const Color(0xFF4D9F68))), child: Text(badge, style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Color(0xFF7DE79A)))),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
-            Text(subtitle, style: const TextStyle(fontSize: 10, color: Colors.white54)),
-          ],
         ),
       ),
     );
@@ -2234,15 +2327,16 @@ class RulesView extends StatelessWidget {
             child: const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _RuleLine('Current build uses social chips only; cash conversion is disabled.'),
-                _RuleLine('Apple Pay, Cash App Pay, card deposits, PayPal withdrawals, and bank/ACH withdrawals are SANDBOX only until cash mode is legally approved and enabled on the server.'),
+                _RuleLine('3 Patti Social uses virtual entertainment chips only. Chips have no cash value.'),
+                _RuleLine('Purchased chips cannot be withdrawn, sold, transferred, or redeemed for money or prizes.'),
                 _RuleLine('Boot starts at 10 chips.'),
                 _RuleLine('Table limits: 2-5 players = 5K, 6-8 players = 20K, 9-10 players = 50K.'),
                 _RuleLine('Players compete against other players; the server deals the cards.'),
-                _RuleLine('Prototype table fee: 5% of a settled pot. The winner receives the remaining payout.'),
+                _RuleLine('A 5% virtual-chip table fee is deducted from a settled pot to help balance the social-chip economy.'),
+                _RuleLine('VIP is a digital membership benefit and does not increase the odds of winning cards.'),
                 SizedBox(height: 12),
                 Text(
-                  'Important: real deposits and withdrawals are not enabled in this build. Cash play must only be activated where the product is properly licensed and permitted.',
+                  'This release is social entertainment only. There are no real-money deposits, cash winnings, PayPal withdrawals, bank withdrawals, or cash conversion.',
                   style: TextStyle(color: Colors.amberAccent, height: 1.35),
                 ),
               ],
@@ -4065,6 +4159,7 @@ class PlayerSeat extends StatelessWidget {
   Widget build(BuildContext context) {
     final folded = player['folded'] == true;
     final seen = player['seen'] == true;
+    final vip = player['vip'] == true;
     final name = '${player['name'] ?? 'Player'}';
     final avatar = (player['avatar'] as int? ?? 1).clamp(1, 8).toInt();
     final avatarSize = compact ? 35.0 : 41.0;
@@ -4122,6 +4217,13 @@ class PlayerSeat extends StatelessWidget {
                               style: TextStyle(fontSize: compact ? 8.4 : 9.4, color: Colors.white, fontWeight: FontWeight.w900),
                             ),
                           ),
+                          if (vip)
+                            Container(
+                              margin: const EdgeInsets.only(left: 3),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(color: const Color(0xFF5B3A04), borderRadius: BorderRadius.circular(99), border: Border.all(color: gold.withValues(alpha: .7))),
+                              child: const Text('VIP', style: TextStyle(fontSize: 6.5, color: Color(0xFFFFE39A), fontWeight: FontWeight.w900)),
+                            ),
                           if (isWinner) const Icon(Icons.emoji_events_rounded, color: gold, size: 12),
                         ],
                       ),

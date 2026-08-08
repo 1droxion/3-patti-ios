@@ -7,6 +7,8 @@
     { "source": "/kyc/status", "destination": "/api/index?route=kyc/status" },
     { "source": "/kyc/profile", "destination": "/api/index?route=kyc/profile" },
     { "source": "/kyc/provider-webhook", "destination": "/api/index?route=kyc/provider-webhook" },
+    { "source": "/social/store-config", "destination": "/api/index?route=social/store-config" },
+    { "source": "/social/iap/claim", "destination": "/api/index?route=social/iap/claim" },
     { "source": "/lobby", "destination": "/api/index?route=lobby" },
     { "source": "/payments-config", "destination": "/api/index?route=payments-config" },
     { "source": "/wallet", "destination": "/api/index?route=wallet" },

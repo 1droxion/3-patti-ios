@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes, randomInt, createHash, createHmac } from 'node:crypto';
+import { randomUUID, randomBytes, randomInt, createHash, createHmac, sign as cryptoSign } from 'node:crypto';
 import * as store from './store.js';
 import { issueSessionToken, requirePlayerAuth, securityStatus, clientFingerprint } from './security.js';
 
@@ -293,6 +293,7 @@ function publicState(room, playerId) {
       id: p.id,
       name: p.name,
       avatar: p.avatar || 1,
+      vip: Boolean(p.vip),
       chips: p.chips,
       folded: p.folded,
       seen: p.seen,
@@ -374,7 +375,7 @@ function makeRoom(playerCount) {
   };
 }
 
-async function joinRoom({ playerId, name, avatar, playerCount, excludeRoomId = '', accountId }) {
+async function joinRoom({ playerId, name, avatar, vip = false, playerCount, excludeRoomId = '', accountId }) {
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 10) {
     throw new Error('playerCount must be 2..10');
   }
@@ -414,6 +415,7 @@ async function joinRoom({ playerId, name, avatar, playerCount, excludeRoomId = '
         reserveRef,
         name: String(name || 'Player').slice(0, 24),
         avatar: Math.max(1, Math.min(8, Number(avatar) || 1)),
+        vip: Boolean(vip),
         chips: entryChips,
         folded: false,
         seen: false,
@@ -424,6 +426,7 @@ async function joinRoom({ playerId, name, avatar, playerCount, excludeRoomId = '
     } else {
       existing.name = String(name || existing.name || 'Player').slice(0, 24);
       existing.avatar = Math.max(1, Math.min(8, Number(avatar) || existing.avatar || 1));
+      existing.vip = Boolean(vip);
       existing.accountId = existing.accountId || accountId;
     }
 
@@ -600,6 +603,82 @@ function userCashEligibility(user) {
 }
 
 
+const SOCIAL_PRODUCTS = Object.freeze({
+  'com.droxion.threepatti.chips25k': { chips: 25000, type: 'chips', label: '25K Social Chips' },
+  'com.droxion.threepatti.chips150k': { chips: 150000, type: 'chips', label: '150K Social Chips' },
+  'com.droxion.threepatti.chips400k': { chips: 400000, type: 'chips', label: '400K Social Chips' },
+  'com.droxion.threepatti.chips1m': { chips: 1000000, type: 'chips', label: '1M Social Chips' },
+  'com.droxion.threepatti.vip.monthly': { chips: 0, type: 'vip', vipDays: 31, label: 'VIP Monthly' },
+});
+
+function vipActive(user) {
+  if (!user?.vip_until) return false;
+  const t = new Date(user.vip_until).getTime();
+  return Number.isFinite(t) && t > Date.now();
+}
+
+function socialIapMode() {
+  const mode = String(process.env.SOCIAL_IAP_MODE || 'sandbox').toLowerCase();
+  return mode === 'live' ? 'live' : 'sandbox';
+}
+
+
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+
+function appleIapConfigReady() {
+  return Boolean(
+    process.env.APPLE_IAP_ISSUER_ID &&
+    process.env.APPLE_IAP_KEY_ID &&
+    process.env.APPLE_IAP_PRIVATE_KEY &&
+    process.env.APPLE_BUNDLE_ID
+  );
+}
+
+function makeAppleServerJwt() {
+  if (!appleIapConfigReady()) throw new Error('Apple IAP server credentials are not configured');
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'ES256', kid: String(process.env.APPLE_IAP_KEY_ID), typ: 'JWT' };
+  const payload = {
+    iss: String(process.env.APPLE_IAP_ISSUER_ID),
+    iat: now,
+    exp: now + 300,
+    aud: 'appstoreconnect-v1',
+    bid: String(process.env.APPLE_BUNDLE_ID),
+  };
+  const input = `${base64UrlJson(header)}.${base64UrlJson(payload)}`;
+  const key = String(process.env.APPLE_IAP_PRIVATE_KEY).replace(/\\n/g, '\n');
+  const signature = cryptoSign('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+  return `${input}.${signature}`;
+}
+
+function decodeJwsPayload(jws) {
+  const parts = String(jws || '').split('.');
+  if (parts.length !== 3) throw new Error('Invalid Apple signed transaction');
+  return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+}
+
+async function verifyAppleTransaction(transactionId, expectedProductId) {
+  const environment = String(process.env.APPLE_IAP_ENV || (socialIapMode() === 'live' ? 'production' : 'sandbox')).toLowerCase();
+  const base = environment === 'production'
+    ? 'https://api.storekit.itunes.apple.com'
+    : 'https://api.storekit-sandbox.itunes.apple.com';
+  const token = makeAppleServerJwt();
+  const response = await fetch(`${base}/inApps/v1/transactions/${encodeURIComponent(transactionId)}`, {
+    headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.errorMessage || `Apple transaction verification failed (${response.status})`);
+  const tx = decodeJwsPayload(data.signedTransactionInfo);
+  if (String(tx.transactionId || '') !== String(transactionId)) throw new Error('Apple transaction ID mismatch');
+  if (String(tx.productId || '') !== String(expectedProductId)) throw new Error('Apple product ID mismatch');
+  if (String(tx.bundleId || '') !== String(process.env.APPLE_BUNDLE_ID)) throw new Error('Apple bundle ID mismatch');
+  if (tx.revocationDate) throw new Error('Apple transaction was revoked');
+  return tx;
+}
+
+
 export async function handle(req, res, forcedRoute = '') {
   if (req.method === 'OPTIONS') return json(res, 204, {});
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -611,7 +690,7 @@ export async function handle(req, res, forcedRoute = '') {
       const readiness = paymentReadiness();
       return json(res, 200, {
         ok: true,
-        version: '1.5.0',
+        version: '1.6.0',
         cachedRooms: rooms.size,
         persistence: readiness.persistence,
         security: readiness.security,
@@ -760,6 +839,90 @@ export async function handle(req, res, forcedRoute = '') {
       return json(res, 200, { ok: true, kycStatus: updated.kyc_status, ageVerified: updated.age_verified, geoState: updated.geo_state, cashEligible: updated.cash_eligible });
     }
 
+
+    if (req.method === 'GET' && route === 'social/store-config') {
+      const playerId = String(url.searchParams.get('playerId') || '');
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const wallet = await store.getWallet(user.id);
+      return json(res, 200, {
+        ok: true,
+        mode: socialIapMode(),
+        cashValue: false,
+        withdrawable: false,
+        vipActive: vipActive(user),
+        vipUntil: user.vip_until || null,
+        wallet: { chips: Number(wallet?.chip_balance || 0) },
+        products: Object.entries(SOCIAL_PRODUCTS).map(([id, v]) => ({ id, ...v })),
+      });
+    }
+
+    if (req.method === 'POST' && route === 'social/iap/claim') {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const productId = String(body.productId || '');
+      const transactionId = String(body.transactionId || '').trim();
+      const product = SOCIAL_PRODUCTS[productId];
+      if (!product) return json(res, 400, { error: 'Unknown social product' });
+      if (!transactionId || transactionId.length < 3) return json(res, 400, { error: 'Transaction ID required' });
+
+      const mode = socialIapMode();
+      let verifiedTransaction = null;
+      if (mode === 'live') {
+        if (!appleIapConfigReady()) return json(res, 503, { error: 'Live App Store verification credentials are not configured' });
+        verifiedTransaction = await verifyAppleTransaction(transactionId, productId);
+      } else if (appleIapConfigReady()) {
+        try { verifiedTransaction = await verifyAppleTransaction(transactionId, productId); } catch (_) { /* TestFlight/dev can continue in sandbox mode. */ }
+      }
+      const referenceId = `social-iap:${transactionId}`;
+      const walletResult = await store.applyWalletTransaction({
+        userId: user.id,
+        chipsDelta: Number(product.chips || 0),
+        usdCentsDelta: 0,
+        type: product.type === 'vip' ? 'social_vip_purchase' : 'social_chip_purchase',
+        referenceId,
+        metadata: {
+          productId,
+          transactionId,
+          verificationSource: String(body.verificationSource || ''),
+          mode,
+          appleVerified: Boolean(verifiedTransaction),
+          cashValue: false,
+          withdrawable: false,
+        },
+      });
+
+      let updatedUser = user;
+      if (product.type === 'vip' && !walletResult.idempotent) {
+        const current = user.vip_until ? new Date(user.vip_until).getTime() : 0;
+        const base = Math.max(Date.now(), Number.isFinite(current) ? current : 0);
+        const until = new Date(base + Number(product.vipDays || 31) * 86400000).toISOString();
+        updatedUser = await store.setVipUntil({ userId: user.id, vipUntil: until });
+      }
+      await store.audit({
+        actorUserId: user.id,
+        eventType: 'social_iap_claim',
+        referenceId,
+        metadata: { productId, transactionId, idempotent: Boolean(walletResult.idempotent), mode, appleVerified: Boolean(verifiedTransaction) },
+      });
+      return json(res, 200, {
+        ok: true,
+        idempotent: Boolean(walletResult.idempotent),
+        productId,
+        cashValue: false,
+        withdrawable: false,
+        walletChips: Number(walletResult.chip_balance || 0),
+        vipActive: product.type === 'vip' ? vipActive(updatedUser) : vipActive(user),
+        message: product.type === 'vip' ? 'VIP activated.' : `${product.label} added.`,
+      });
+    }
+
     if (req.method === 'GET' && route === 'lobby') {
       return json(res, 200, await lobbyState());
     }
@@ -888,7 +1051,7 @@ export async function handle(req, res, forcedRoute = '') {
       const account = await store.ensureUser({ externalPlayerId: playerId, displayName: body.name, avatar: body.avatar });
       if (auth?.aid && String(auth.aid) !== String(account.user.id)) return json(res, 403, { error: 'Account mismatch' });
       const room = await joinRoom({
-        playerId, name: body.name, avatar: body.avatar, playerCount: Number(body.playerCount),
+        playerId, name: body.name, avatar: body.avatar, vip: vipActive(account.user), playerCount: Number(body.playerCount),
         excludeRoomId: String(body.excludeRoomId || ''), accountId: account.user.id,
       });
       return json(res, 200, publicState(room, playerId));

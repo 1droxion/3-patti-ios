@@ -1,58 +1,105 @@
+# 3 Patti Social V1.6 — Social Launch Monetization
 
-# 3 Patti Social V1.5 — KYC + Cash-Readiness Gate
+Version: **1.6.0+17**
 
-Version: **1.5.0+16**
+This is the social-only launch build. Real-money deposit/withdrawal UI is removed from normal navigation. The dormant future cash/KYC backend foundation remains in the codebase, but cash mode stays OFF.
 
-This build adds the requested identity flow without selfie/video:
-- full legal name
-- email
-- mobile number
-- date of birth / 21+ declaration
-- home address
-- SSN or TIN (optional at initial submission)
-- driver's license or passport
+## Social monetization in this build
 
-Security behavior:
-- raw SSN/TIN is never persisted by this backend
-- raw license/passport number is never persisted by this backend
-- only last 4 + SHA-256 keyed hash are stored
-- cash eligibility remains false until an approved KYC provider marks the user verified and confirms age/location
+Apple In-App Purchase is wired through Flutter's official `in_app_purchase` plugin.
 
-## Live-money safety gates
-Real deposits/payouts do not activate just because UI is present. The backend requires ALL of these server-side gates:
-- persistent Supabase/Postgres
-- required auth secret
-- REAL_MONEY_APPROVED=true
-- IDENTITY_PROVIDER_READY=true
-- KYC_PROVIDER_READY=true
-- GEOLOCATION_PROVIDER_READY=true
-- PAYMENT_PROVIDER_APPROVED=true
-- REGULATORY_APPROVAL_ID set
-- PAYMENT_APPROVAL_ID set
-- CASH_MODE_ENABLED=true
-- user KYC status = verified
-- age verified
-- current geo state in APPROVED_CASH_STATES
-- user cash_eligible=true
+Create these products in App Store Connect with the exact Product IDs:
 
-`/deposit-live` and `/withdraw-live` are intentionally fail-closed until a real approved payment adapter + signed provider webhooks are connected. This prevents accidental fake or unapproved cash movement.
+### Consumable IAPs
+- `com.droxion.threepatti.chips25k` — 25K Social Chips — suggested $0.99
+- `com.droxion.threepatti.chips150k` — 150K Social Chips — suggested $4.99
+- `com.droxion.threepatti.chips400k` — 400K Social Chips — suggested $9.99
+- `com.droxion.threepatti.chips1m` — 1M Social Chips — suggested $19.99
 
-## New endpoints
-- GET `/kyc/status?playerId=...`
-- POST `/kyc/profile`
-- POST `/kyc/provider-webhook`
-- POST `/deposit-live` (fail-closed until provider adapter exists)
-- POST `/withdraw-live` (fail-closed until provider adapter exists)
+### Auto-renewable subscription
+- `com.droxion.threepatti.vip.monthly` — VIP Monthly — suggested $6.99/month
 
-## Deploy
+VIP currently gives a visible VIP badge/status. Add more cosmetic VIP benefits later, but do not make VIP change card odds.
+
+## Important social-chip rule
+
+Purchased chips are virtual entertainment credits only:
+- no cash value
+- no PayPal/bank withdrawal
+- no USD conversion
+- no transfer or resale
+- no physical prize redemption
+
+The 5% table fee is a virtual-chip economy sink, not a cash gambling rake in this release.
+
+## App Store purchase security
+
+`SOCIAL_IAP_MODE=sandbox` is for TestFlight/development.
+
+For production, set `SOCIAL_IAP_MODE=live` only after Apple server transaction verification credentials are configured:
+- `APPLE_BUNDLE_ID=com.droxion.threepatti`
+- `APPLE_IAP_ISSUER_ID`
+- `APPLE_IAP_KEY_ID`
+- `APPLE_IAP_PRIVATE_KEY`
+- `APPLE_IAP_ENV=production`
+
+When live mode is enabled the backend verifies the transaction with Apple's App Store Server API before delivering chips/VIP. Transaction IDs are idempotent, so the same purchase cannot be credited twice.
+
+## What changed from V1.5
+
+- New Social Store
+- 4 virtual chip packs
+- VIP Monthly
+- StoreKit purchase stream + restore purchases
+- server-side social product catalog
+- server wallet delivery after purchase claim
+- duplicate transaction protection
+- Apple App Store Server API verification path for live mode
+- VIP status stored in backend and displayed at player seats
+- Withdraw removed from menu
+- Cash deposit methods removed from player-facing Wallet
+- KYC button removed from normal Profile
+- Wallet renamed Social Chips
+- Rules rewritten for social-only launch
+- Version 1.6.0 Build 17
+
+## Install in Codespaces
+
 ```bash
 cd /workspaces/3-patti-ios
-unzip -o three_patti_v15_kyc_cash_ready.zip
-rm three_patti_v15_kyc_cash_ready.zip
+unzip -o three_patti_v16_social_launch.zip
+rm three_patti_v16_social_launch.zip
 flutter pub get
 git add .
-git commit -m "V1.5 KYC and cash readiness"
+git commit -m "V1.6 social launch monetization"
 git push
 ```
 
-Run the updated `backend/schema.sql` in Supabase SQL Editor once; the new V1.5 statements are migration-safe (`add column if not exists`).
+## Vercel
+
+Keep real-money switches OFF.
+
+For TestFlight social IAP testing add:
+
+```text
+SOCIAL_IAP_MODE=sandbox
+APPLE_IAP_ENV=sandbox
+APPLE_BUNDLE_ID=com.droxion.threepatti
+```
+
+The Apple server credentials can be added when you are ready for production receipt verification.
+
+## Before App Store public launch
+
+1. Complete Apple's Paid Apps agreement / tax / banking setup in App Store Connect.
+2. Create the 4 consumable IAP products above.
+3. Create a subscription group and the VIP Monthly subscription.
+4. Add product names/descriptions/prices and review information.
+5. Test all purchases in TestFlight/Sandbox.
+6. Configure Apple server transaction credentials on Vercel.
+7. Set `SOCIAL_IAP_MODE=live` only after verification works.
+8. Submit the app + IAPs/subscription for App Review.
+
+## Rewarded ads
+
+Not enabled in this ZIP yet. AdMob needs your own AdMob iOS App ID and Rewarded Ad Unit ID in the iOS project. Do not publish using Google's test ad IDs. Add this after the App Store social-chip purchase flow is stable.

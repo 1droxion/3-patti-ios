@@ -67,6 +67,7 @@ export async function ensureUser({ externalPlayerId, displayName, avatar }) {
         age_verified: false,
         geo_state: null,
         cash_eligible: false,
+        vip_until: null,
       };
       memUsers.set(external, user);
       memWallets.set(user.id, { user_id: user.id, chip_balance: initialDemoChips, usd_cents: 0 });
@@ -160,6 +161,23 @@ export async function setKycVerification({ userId, status, ageVerified, geoState
     return { ...user };
   }
   const rows = await sb(`users?id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', prefer: 'return=representation', body: patch });
+  return rows?.[0] || patch;
+}
+
+
+export async function setVipUntil({ userId, vipUntil }) {
+  const patch = { vip_until: vipUntil || null, updated_at: new Date().toISOString() };
+  if (!supabaseReady()) {
+    const user = [...memUsers.values()].find(u => String(u.id) === String(userId));
+    if (!user) throw new Error('User not found');
+    Object.assign(user, patch);
+    return { ...user };
+  }
+  const rows = await sb(`users?id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    prefer: 'return=representation',
+    body: patch,
+  });
   return rows?.[0] || patch;
 }
 

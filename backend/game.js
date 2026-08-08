@@ -545,9 +545,15 @@ function paymentReadiness() {
     persistence: persistence.persistent,
     auth: security.authSecretConfigured && security.authRequired,
   };
+  const approvalIds = {
+    regulatory: String(process.env.REGULATORY_APPROVAL_ID || '').trim(),
+    payments: String(process.env.PAYMENT_APPROVAL_ID || '').trim(),
+  };
+  flags.regulatoryApprovalId = approvalIds.regulatory.length >= 6;
+  flags.paymentApprovalId = approvalIds.payments.length >= 6;
   const requested = String(process.env.CASH_MODE_ENABLED || '').toLowerCase() === 'true';
   const blockers = Object.entries(flags).filter(([, ok]) => !ok).map(([name]) => name);
-  return { requested, enabled: requested && blockers.length === 0, blockers, flags, persistence, security };
+  return { requested, enabled: requested && blockers.length === 0, blockers, flags, approvalIds, persistence, security };
 }
 
 function maskDestination(provider, destination) {
@@ -557,6 +563,40 @@ function maskDestination(provider, destination) {
     return `${left.slice(0, 2)}***@${right}`;
   }
   return value.length > 4 ? `***${value.slice(-4)}` : value;
+}
+
+
+function calculateAge(dobText) {
+  const dob = new Date(String(dobText || ''));
+  if (Number.isNaN(dob.getTime())) return null;
+  const now = new Date();
+  let age = now.getUTCFullYear() - dob.getUTCFullYear();
+  const month = now.getUTCMonth() - dob.getUTCMonth();
+  if (month < 0 || (month === 0 && now.getUTCDate() < dob.getUTCDate())) age--;
+  return age;
+}
+
+function cleanLast4(value) {
+  const compact = String(value || '').replace(/[^A-Za-z0-9]/g, '');
+  return compact ? compact.slice(-4) : null;
+}
+
+function approvedCashStates() {
+  return String(process.env.APPROVED_CASH_STATES || '')
+    .split(',').map(v => v.trim().toUpperCase()).filter(Boolean);
+}
+
+function userCashEligibility(user) {
+  const readiness = paymentReadiness();
+  const states = approvedCashStates();
+  const blockers = [];
+  if (!readiness.enabled) blockers.push(...readiness.blockers.map(v => `platform:${v}`));
+  if (String(user?.kyc_status || '') !== 'verified') blockers.push('user:kyc');
+  if (!user?.age_verified) blockers.push('user:age21');
+  const state = String(user?.geo_state || '').toUpperCase();
+  if (!state || !states.includes(state)) blockers.push('user:approved_state_location');
+  if (!user?.cash_eligible) blockers.push('user:cash_eligible');
+  return { eligible: blockers.length === 0, blockers, approvedStates: states };
 }
 
 
@@ -571,7 +611,7 @@ export async function handle(req, res, forcedRoute = '') {
       const readiness = paymentReadiness();
       return json(res, 200, {
         ok: true,
-        version: '1.4.0',
+        version: '1.5.0',
         cachedRooms: rooms.size,
         persistence: readiness.persistence,
         security: readiness.security,
@@ -612,6 +652,114 @@ export async function handle(req, res, forcedRoute = '') {
       });
     }
 
+
+    if (req.method === 'GET' && route === 'kyc/status') {
+      const playerId = String(url.searchParams.get('playerId') || '');
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const eligibility = userCashEligibility(user);
+      return json(res, 200, {
+        ok: true,
+        profile: {
+          legalName: user.legal_name || '',
+          email: user.email || '',
+          phone: user.phone || '',
+          dob: user.dob || '',
+          homeAddress: user.home_address || '',
+          taxIdType: user.tax_id_type || '',
+          taxIdLast4: user.tax_id_last4 || '',
+          governmentIdType: user.government_id_type || '',
+          governmentIdLast4: user.government_id_last4 || '',
+          ageDeclared21: Boolean(user.age_declared_21),
+        },
+        verification: {
+          kycStatus: user.kyc_status || 'unverified',
+          ageVerified: Boolean(user.age_verified),
+          geoState: user.geo_state || null,
+          cashEligible: eligibility.eligible,
+          blockers: eligibility.blockers,
+        },
+      });
+    }
+
+    if (req.method === 'POST' && route === 'kyc/profile') {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+
+      const legalName = String(body.legalName || '').trim();
+      const email = String(body.email || '').trim().toLowerCase();
+      const phone = String(body.phone || '').trim();
+      const dob = String(body.dob || '').trim();
+      const homeAddress = String(body.homeAddress || '').trim();
+      const taxIdType = String(body.taxIdType || '').trim().toLowerCase();
+      const taxId = String(body.taxId || '').trim();
+      const governmentIdType = String(body.governmentIdType || '').trim().toLowerCase();
+      const governmentId = String(body.governmentId || '').trim();
+      const ageDeclared21 = body.ageDeclared21 === true;
+      const age = calculateAge(dob);
+
+      if (legalName.length < 3) return json(res, 400, { error: 'Full legal name required' });
+      if (!email.includes('@') || email.length < 5) return json(res, 400, { error: 'Valid email required' });
+      if (phone.replace(/\D/g, '').length < 10) return json(res, 400, { error: 'Valid mobile number required' });
+      if (age === null) return json(res, 400, { error: 'Valid date of birth required' });
+      if (age < 21 || !ageDeclared21) return json(res, 403, { error: 'Cash gaming verification requires age 21+' });
+      if (homeAddress.length < 8) return json(res, 400, { error: 'Home address required' });
+      if (!['license', 'passport'].includes(governmentIdType)) return json(res, 400, { error: 'Driver license or passport required' });
+      if (governmentId.replace(/[^A-Za-z0-9]/g, '').length < 5) return json(res, 400, { error: 'Government ID number required' });
+      if (taxId && !['ssn', 'tin'].includes(taxIdType)) return json(res, 400, { error: 'Choose SSN or TIN for optional tax ID' });
+
+      const taxIdHash = taxId ? createHash('sha256').update(`${process.env.KYC_HASH_PEPPER || process.env.AUTH_SECRET || 'dev'}:${taxId}`).digest('hex') : null;
+      const governmentIdHash = createHash('sha256').update(`${process.env.KYC_HASH_PEPPER || process.env.AUTH_SECRET || 'dev'}:${governmentId}`).digest('hex');
+      const updated = await store.updateKycProfile({
+        userId: user.id,
+        legalName,
+        email,
+        phone,
+        dob,
+        homeAddress,
+        taxIdType: taxId ? taxIdType : null,
+        taxIdLast4: cleanLast4(taxId),
+        taxIdHash,
+        governmentIdType,
+        governmentIdLast4: cleanLast4(governmentId),
+        governmentIdHash,
+        ageDeclared21: true,
+      });
+      await store.audit({ actorUserId: user.id, eventType: 'kyc_profile_submitted', referenceId: user.id, metadata: { governmentIdType, taxIdProvided: Boolean(taxId), age } });
+      return json(res, 200, {
+        ok: true,
+        status: updated.kyc_status || 'submitted',
+        message: 'Identity details saved securely. Verification is pending the approved KYC provider.',
+        rawTaxIdStored: false,
+        rawGovernmentIdStored: false,
+      });
+    }
+
+    if (req.method === 'POST' && route === 'kyc/provider-webhook') {
+      const expected = String(process.env.KYC_WEBHOOK_SECRET || '');
+      const provided = String(req.headers['x-kyc-webhook-secret'] || '');
+      if (!expected || provided !== expected) return json(res, 401, { error: 'Invalid KYC webhook secret' });
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const status = String(body.status || '').toLowerCase();
+      if (!['verified', 'failed', 'pending'].includes(status)) return json(res, 400, { error: 'Invalid KYC status' });
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      const approvedStates = approvedCashStates();
+      const geoState = String(body.geoState || user.geo_state || '').toUpperCase() || null;
+      const ageVerified = body.ageVerified === true;
+      const cashEligible = status === 'verified' && ageVerified && geoState && approvedStates.includes(geoState);
+      const updated = await store.setKycVerification({ userId: user.id, status, ageVerified, geoState, cashEligible });
+      await store.audit({ actorUserId: user.id, eventType: 'kyc_provider_result', referenceId: String(body.verificationId || ''), metadata: { status, ageVerified, geoState, cashEligible } });
+      return json(res, 200, { ok: true, kycStatus: updated.kyc_status, ageVerified: updated.age_verified, geoState: updated.geo_state, cashEligible: updated.cash_eligible });
+    }
+
     if (req.method === 'GET' && route === 'lobby') {
       return json(res, 200, await lobbyState());
     }
@@ -647,6 +795,31 @@ export async function handle(req, res, forcedRoute = '') {
       if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
       const wallet = await store.getWallet(user.id);
       return json(res, 200, { ok: true, chips: Number(wallet?.chip_balance || 0), usdCents: Number(wallet?.usd_cents || 0) });
+    }
+
+
+    if (req.method === 'POST' && route === 'deposit-live') {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const eligibility = userCashEligibility(user);
+      if (!eligibility.eligible) return json(res, 403, { error: 'Real-money deposit is locked', blockers: eligibility.blockers });
+      return json(res, 503, { error: 'Live deposit adapter is not connected. Do not credit money without a signed provider webhook.' });
+    }
+
+    if (req.method === 'POST' && route === 'withdraw-live') {
+      const body = await readBody(req);
+      const playerId = String(body.playerId || '').trim();
+      const auth = requirePlayerAuth(req, playerId);
+      const user = await store.getUserByExternalId(playerId);
+      if (!user) return json(res, 404, { error: 'Account not found' });
+      if (auth?.aid && String(auth.aid) !== String(user.id)) return json(res, 403, { error: 'Account mismatch' });
+      const eligibility = userCashEligibility(user);
+      if (!eligibility.eligible) return json(res, 403, { error: 'Real-money withdrawal is locked', blockers: eligibility.blockers });
+      return json(res, 503, { error: 'Live payout adapter is not connected. Do not mark a payout completed without a signed provider webhook.' });
     }
 
     if (req.method === 'POST' && route === 'deposit-sandbox') {

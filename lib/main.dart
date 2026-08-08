@@ -1316,7 +1316,7 @@ class AppMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('3 Patti Social • v1.4', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
+              const Text('3 Patti Social • v1.5', textAlign: TextAlign.center, style: TextStyle(fontSize: 9, color: Colors.white30)),
             ],
           ),
         ),
@@ -1452,6 +1452,7 @@ class HistoryView extends StatelessWidget {
   }
 }
 
+
 class ProfileView extends StatelessWidget {
   final AppSession session;
 
@@ -1464,7 +1465,7 @@ class ProfileView extends StatelessWidget {
       subtitle: 'Your player identity',
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
+          constraints: const BoxConstraints(maxWidth: 820),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: _panelDecoration(),
@@ -1503,6 +1504,13 @@ class ProfileView extends StatelessWidget {
                         onPressed: () => _editName(context),
                         icon: const Icon(Icons.edit_rounded),
                         label: const Text('EDIT DISPLAY NAME'),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => KycScreen(session: session))),
+                        icon: const Icon(Icons.verified_user_rounded, color: gold),
+                        label: const Text('VERIFY IDENTITY / 21+'),
+                        style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFFFE0A0), side: const BorderSide(color: Color(0xFF8C6718))),
                       ),
                     ],
                   ),
@@ -1574,6 +1582,192 @@ class ProfileView extends StatelessWidget {
     );
     controller.dispose();
     if (result != null) session.updateName(result);
+  }
+}
+
+class KycScreen extends StatefulWidget {
+  final AppSession session;
+  const KycScreen({super.key, required this.session});
+
+  @override
+  State<KycScreen> createState() => _KycScreenState();
+}
+
+class _KycScreenState extends State<KycScreen> {
+  final legalName = TextEditingController();
+  final email = TextEditingController();
+  final phone = TextEditingController();
+  final dob = TextEditingController();
+  final address = TextEditingController();
+  final taxId = TextEditingController();
+  final govId = TextEditingController();
+  String taxType = 'ssn';
+  String govType = 'license';
+  bool age21 = false;
+  bool loading = true;
+  bool saving = false;
+  String status = 'UNVERIFIED';
+  String message = 'Complete identity details to prepare Cash Mode verification.';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    legalName.dispose(); email.dispose(); phone.dispose(); dob.dispose(); address.dispose(); taxId.dispose(); govId.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await Api.get('/kyc/status?playerId=${Uri.encodeQueryComponent(widget.session.playerId)}');
+      final p = data['profile'];
+      final v = data['verification'];
+      if (p is Map) {
+        legalName.text = '${p['legalName'] ?? ''}';
+        email.text = '${p['email'] ?? ''}';
+        phone.text = '${p['phone'] ?? ''}';
+        dob.text = '${p['dob'] ?? ''}';
+        address.text = '${p['homeAddress'] ?? ''}';
+        taxType = '${p['taxIdType'] ?? ''}' == 'tin' ? 'tin' : 'ssn';
+        govType = '${p['governmentIdType'] ?? ''}' == 'passport' ? 'passport' : 'license';
+        age21 = p['ageDeclared21'] == true;
+      }
+      if (v is Map) status = '${v['kycStatus'] ?? 'unverified'}'.toUpperCase();
+    } catch (e) {
+      message = 'Could not load verification status: $e';
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _save() async {
+    if (saving) return;
+    setState(() { saving = true; message = 'Submitting identity details…'; });
+    try {
+      final data = await Api.post('/kyc/profile', {
+        'playerId': widget.session.playerId,
+        'legalName': legalName.text,
+        'email': email.text,
+        'phone': phone.text,
+        'dob': dob.text,
+        'homeAddress': address.text,
+        'taxIdType': taxType,
+        'taxId': taxId.text,
+        'governmentIdType': govType,
+        'governmentId': govId.text,
+        'ageDeclared21': age21,
+      });
+      status = '${data['status'] ?? 'submitted'}'.toUpperCase();
+      message = '${data['message'] ?? 'Submitted.'}';
+      taxId.clear();
+      govId.clear();
+    } catch (e) {
+      message = 'Verification submission failed: $e';
+    }
+    if (mounted) setState(() => saving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: ink,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF050B08),
+        title: const Text('VERIFY IDENTITY / 21+', style: TextStyle(color: gold, fontWeight: FontWeight.w900)),
+      ),
+      body: CasinoBackdrop(
+        child: SafeArea(
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(18),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 860),
+                      child: Container(
+                        padding: const EdgeInsets.all(18),
+                        decoration: _panelDecoration(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.verified_user_rounded, color: gold, size: 30),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text('STATUS: $status', style: const TextStyle(fontSize: 18, color: Color(0xFFFFE0A0), fontWeight: FontWeight.w900))),
+                            ]),
+                            const SizedBox(height: 6),
+                            const Text('No selfie or video in this flow. SSN/TIN is optional at initial submission. An approved cash-gaming operator/KYC provider may still require additional information before real-money play.', style: TextStyle(fontSize: 10.5, color: Colors.white60)),
+                            const SizedBox(height: 14),
+                            Row(children: [
+                              Expanded(child: TextField(controller: legalName, decoration: const InputDecoration(labelText: 'Full legal name', border: OutlineInputBorder()))),
+                              const SizedBox(width: 10),
+                              Expanded(child: TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()))),
+                            ]),
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              Expanded(child: TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile number', border: OutlineInputBorder()))),
+                              const SizedBox(width: 10),
+                              Expanded(child: TextField(controller: dob, decoration: const InputDecoration(labelText: 'Date of birth', hintText: 'YYYY-MM-DD', border: OutlineInputBorder()))),
+                            ]),
+                            const SizedBox(height: 10),
+                            TextField(controller: address, decoration: const InputDecoration(labelText: 'Home address', border: OutlineInputBorder())),
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              SizedBox(
+                                width: 150,
+                                child: DropdownButtonFormField<String>(
+                                  value: taxType,
+                                  decoration: const InputDecoration(labelText: 'Optional tax ID', border: OutlineInputBorder()),
+                                  items: const [DropdownMenuItem(value: 'ssn', child: Text('SSN')), DropdownMenuItem(value: 'tin', child: Text('TIN'))],
+                                  onChanged: (v) => setState(() => taxType = v ?? 'ssn'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(child: TextField(controller: taxId, obscureText: true, decoration: const InputDecoration(labelText: 'SSN/TIN — optional now', hintText: 'Not stored in raw form', border: OutlineInputBorder()))),
+                            ]),
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              SizedBox(
+                                width: 190,
+                                child: DropdownButtonFormField<String>(
+                                  value: govType,
+                                  decoration: const InputDecoration(labelText: 'Government ID', border: OutlineInputBorder()),
+                                  items: const [DropdownMenuItem(value: 'license', child: Text("Driver's license")), DropdownMenuItem(value: 'passport', child: Text('Passport'))],
+                                  onChanged: (v) => setState(() => govType = v ?? 'license'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(child: TextField(controller: govId, obscureText: true, decoration: const InputDecoration(labelText: 'License / passport number', hintText: 'Not stored in raw form', border: OutlineInputBorder()))),
+                            ]),
+                            const SizedBox(height: 8),
+                            CheckboxListTile(
+                              contentPadding: EdgeInsets.zero,
+                              value: age21,
+                              onChanged: (v) => setState(() => age21 = v == true),
+                              activeColor: gold,
+                              title: const Text('I confirm I am 21 or older', style: TextStyle(fontWeight: FontWeight.w900)),
+                              subtitle: const Text('Date of birth must also show age 21+.', style: TextStyle(fontSize: 10, color: Colors.white54)),
+                            ),
+                            const SizedBox(height: 6),
+                            FilledButton.icon(
+                              onPressed: saving ? null : _save,
+                              icon: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.lock_rounded),
+                              label: const Text('SUBMIT FOR VERIFICATION'),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10.5, color: Colors.white60)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    );
   }
 }
 

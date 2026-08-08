@@ -10,7 +10,7 @@ const memHands = new Set();
 const memAudit = [];
 
 function supabaseReady() {
-  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
 }
 
 export function persistenceStatus() {
@@ -23,7 +23,7 @@ export function persistenceStatus() {
 
 async function sb(path, { method = 'GET', body, prefer = '', headers = {} } = {}) {
   const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
-  const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+  const key = String(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '');
   if (!base || !key) throw new Error('Supabase persistence is not configured');
   const response = await fetch(`${base}/rest/v1/${path}`, {
     method,
@@ -114,6 +114,53 @@ export async function getUserByExternalId(externalPlayerId) {
   if (!supabaseReady()) return memUsers.get(external) || null;
   const rows = await sb(`users?external_player_id=eq.${encodeURIComponent(external)}&select=*&limit=1`);
   return rows?.[0] || null;
+}
+
+
+export async function updateKycProfile({ userId, legalName, email, phone, dob, homeAddress, taxIdType, taxIdLast4, taxIdHash, governmentIdType, governmentIdLast4, governmentIdHash, ageDeclared21 }) {
+  const patch = {
+    legal_name: legalName,
+    email,
+    phone,
+    dob,
+    home_address: homeAddress,
+    tax_id_type: taxIdType,
+    tax_id_last4: taxIdLast4,
+    tax_id_hash: taxIdHash,
+    government_id_type: governmentIdType,
+    government_id_last4: governmentIdLast4,
+    government_id_hash: governmentIdHash,
+    age_declared_21: Boolean(ageDeclared21),
+    kyc_status: 'submitted',
+    cash_eligible: false,
+    updated_at: new Date().toISOString(),
+  };
+  if (!supabaseReady()) {
+    const user = [...memUsers.values()].find(u => String(u.id) === String(userId));
+    if (!user) throw new Error('User not found');
+    Object.assign(user, patch);
+    return { ...user };
+  }
+  const rows = await sb(`users?id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', prefer: 'return=representation', body: patch });
+  return rows?.[0] || patch;
+}
+
+export async function setKycVerification({ userId, status, ageVerified, geoState, cashEligible }) {
+  const patch = {
+    kyc_status: String(status || 'pending'),
+    age_verified: Boolean(ageVerified),
+    geo_state: geoState || null,
+    cash_eligible: Boolean(cashEligible),
+    updated_at: new Date().toISOString(),
+  };
+  if (!supabaseReady()) {
+    const user = [...memUsers.values()].find(u => String(u.id) === String(userId));
+    if (!user) throw new Error('User not found');
+    Object.assign(user, patch);
+    return { ...user };
+  }
+  const rows = await sb(`users?id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', prefer: 'return=representation', body: patch });
+  return rows?.[0] || patch;
 }
 
 export async function getWallet(userId) {

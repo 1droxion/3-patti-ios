@@ -184,3 +184,18 @@ as $$
    group by x.player_count
    order by x.player_count;
 $$;
+
+
+-- V1.5 identity/KYC profile fields. Raw SSN/TIN and raw government-ID numbers are NOT stored.
+alter table public.users add column if not exists legal_name text;
+alter table public.users add column if not exists email text;
+alter table public.users add column if not exists phone text;
+alter table public.users add column if not exists dob date;
+alter table public.users add column if not exists home_address text;
+alter table public.users add column if not exists tax_id_type text;
+alter table public.users add column if not exists tax_id_last4 text;
+alter table public.users add column if not exists tax_id_hash text;
+alter table public.users add column if not exists government_id_type text;
+alter table public.users add column if not exists government_id_last4 text;
+alter table public.users add column if not exists government_id_hash text;
+alter table public.users add column if not exists age_declared_21 boolean not null default false;

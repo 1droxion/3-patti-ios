@@ -686,7 +686,7 @@ export async function handle(req, res, forcedRoute = '') {
   try {
     if (req.method === 'GET' && (route === '' || route === 'health')) {
       return json(res, 200, {
-        ok: true, version: '1.7.0', productMode: 'social-only', virtualChipsCashValue: false, withdrawalsEnabled: false, cachedRooms: rooms.size,
+        ok: true, version: '1.7.1', productMode: 'social-only', virtualChipsCashValue: false, withdrawalsEnabled: false, cachedRooms: rooms.size,
         persistence: store.persistenceStatus(), security: securityStatus(), socialIapMode: socialIapMode(), appleIapVerificationConfigured: appleIapConfigReady(), launchReadiness: launchReadiness(),
       });
     }

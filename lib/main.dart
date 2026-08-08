@@ -48,7 +48,7 @@ Future<void> main() async {
 }
 
 class ThreePattiApp extends StatefulWidget {
-  String playerId;
+  final String playerId;
   final String displayName;
   final int avatarIndex;
 
@@ -1387,6 +1387,62 @@ const _socialOffers = <_SocialOffer>[
   _SocialOffer('com.droxion.threepatti.chips1m', '1M CHIPS', 'Mega social chip pack', Icons.diamond_rounded),
   _SocialOffer('com.droxion.threepatti.vip.monthly', 'VIP MONTHLY', 'Monthly VIP badge + premium status', Icons.workspace_premium_rounded, vip: true),
 ];
+
+class PageFrame extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  const PageFrame({super.key, required this.title, required this.subtitle, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 28,
+                decoration: BoxDecoration(color: gold, borderRadius: BorderRadius.circular(8)),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        color: Color(0xFFFFE2A1),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: .8,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 9.5, color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
 
 class StoreView extends StatefulWidget {
   final AppSession session;

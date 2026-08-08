@@ -1,4 +1,8 @@
-# 3 Patti Social V1.7 Launch Candidate — Build 18
+# 3 Patti Social V1.7.1 — iOS Compile Fix
+
+Fixes the V1.7 App Store launch-candidate compile errors: restores the shared PageFrame widget and removes the invalid const constructor from ThreePattiApp. StoreKit deprecation messages in Xcode are warnings, not build blockers. Version 1.7.1+19.
+
+# 3 Patti Social V1.7 Launch Candidate — Build 19
 
 Public social-only App Store candidate.
 
@@ -13,7 +17,7 @@ Changes:
 - Apple transaction verification automatically tries production then sandbox for App Review/TestFlight compatibility.
 - VIP uses Apple's verified subscription expiration when live.
 - Backend fails closed in public mode if Supabase/auth are not configured.
-- Version 1.7.0+18.
+- Version 1.7.1+18.
 
 ## Install
 Upload this ZIP into the root of your existing repo and run:
